@@ -48,6 +48,7 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Providers: providers.md
+  - Agent Loop: agent-loop.md
   - Design:
       - Roadmap: 00-roadmap.md
       - Architecture Overview: 01-architecture.md
@@ -59,5 +60,6 @@ nav:
       - Overview: architecture/index.md
       - "Phase 1: Core Types and Events": architecture/phase-1-core-types-and-events.md
       - "Phase 2: AI Provider Layer": architecture/phase-2-ai-provider-layer.md
+      - "Phase 3: Pure Agent Loop": architecture/phase-3-agent-loop.md
   - ADRs:
       - Use Textual for TUI: adr/0001-use-textual-for-tui.md

@@ -14,6 +14,7 @@ from tau_agent.events import (
     TurnEndEvent,
     TurnStartEvent,
 )
+from tau_agent.loop import run_agent_loop
 from tau_agent.messages import AgentMessage, AssistantMessage, ToolResultMessage, UserMessage
 from tau_agent.tools import AgentTool, AgentToolResult, ToolCall, ToolExecutor
 from tau_agent.types import JSONObject, JSONPrimitive, JSONValue
@@ -42,4 +43,5 @@ __all__ = [
     "TurnEndEvent",
     "TurnStartEvent",
     "UserMessage",
+    "run_agent_loop",
 ]
