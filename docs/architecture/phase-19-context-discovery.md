@@ -1,6 +1,6 @@
-# Phase 19: Project Context Discovery
+# Phase 19: Project Context Discovery and Reload
 
-This phase starts Tau's project instruction discovery and keeps it in
+This phase adds Tau's project instruction discovery and reload command. It stays in
 `tau_coding`, beside resources, commands, and session startup.
 
 The implementation lives in:
@@ -58,15 +58,31 @@ Tau now has:
 
 ```text
 /context
+/reload
 ```
 
-It lists the active project context files in the running session. `/status` and
-`/resources` also include the current context-file count.
+`/context` lists the active project context files in the running session.
 
-## Limitations
+`/reload` refreshes Tau-owned resources for future turns:
 
-This slice does not implement live reload. The running session sees the context
-files discovered at session startup. `/reload` is the next Phase 19 step.
+- skills
+- prompt templates
+- project context files
+- resource diagnostics
+- provider settings used by `/provider` and `/model`
+
+When the session is using Tau's generated system prompt, reload also rebuilds
+the harness system string so the next model request sees the updated resources
+and context. The transcript and session tree are left untouched.
+
+`/status` and `/resources` also include the current context-file count.
+
+## Boundary
+
+Reload is a `tau_coding` operation. It updates the coding-session environment
+around the harness, then gives the harness a rebuilt system string for future
+turns. `tau_agent` does not know where skills, prompts, context files, or
+provider settings come from.
 
 ## Tests
 
@@ -85,3 +101,5 @@ The tests verify:
 - discovered context included in session system prompts
 - discovered context included in print-mode system prompts
 - `/context`, `/status`, and `/resources` command output
+- `/reload` command output
+- reload updating resources and the next-turn system prompt

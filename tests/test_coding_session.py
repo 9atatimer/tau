@@ -348,6 +348,50 @@ async def test_session_loads_with_resource_diagnostics_instead_of_failing(
 
 
 @pytest.mark.anyio
+async def test_session_reload_refreshes_resources_and_system_prompt(tmp_path: Path) -> None:
+    resource_root = tmp_path / "resources"
+    storage = JsonlSessionStorage(tmp_path / "session.jsonl")
+    provider = FakeProvider(
+        [
+            [
+                ProviderResponseStartEvent(model="fake"),
+                ProviderResponseEndEvent(message=AssistantMessage(content="Done")),
+            ]
+        ]
+    )
+    session = await CodingSession.load(
+        CodingSessionConfig(
+            provider=provider,
+            model="fake",
+            storage=storage,
+            cwd=tmp_path,
+            resource_paths=TauResourcePaths(root=resource_root, agents_root=None),
+        )
+    )
+    assert session.skills == ()
+    assert session.context_files == ()
+
+    skills_dir = resource_root / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "testing.md").write_text(
+        "---\ndescription: Test code\n---\n# Testing\nRun pytest.",
+        encoding="utf-8",
+    )
+    (tmp_path / "AGENTS.md").write_text("Reloaded project rules.", encoding="utf-8")
+
+    result = session.handle_command("/reload")
+    _events = await _collect_session_events(session.prompt("Hello"))
+
+    assert result.message is not None
+    assert "Skills: 1" in result.message
+    assert "Context files: 1" in result.message
+    assert [skill.name for skill in session.skills] == ["testing"]
+    assert [Path(context_file.path).name for context_file in session.context_files] == ["AGENTS.md"]
+    assert "Reloaded project rules." in provider.calls[0][1]
+    assert "<name>testing</name>" in provider.calls[0][1]
+
+
+@pytest.mark.anyio
 async def test_session_switches_configured_provider(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

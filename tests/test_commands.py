@@ -32,6 +32,7 @@ class FakeSession:
         self.resource_diagnostics = ()
         self.session_id = "session-1"
         self.session_manager: SessionManager | None = manager
+        self.reload_called = False
 
     def set_model(self, model: str) -> None:
         self.model = model
@@ -40,6 +41,9 @@ class FakeSession:
         self.provider_name = provider_name
         self.model = "local-model"
         self.available_models = ("local-model",)
+
+    def reload(self) -> None:
+        self.reload_called = True
 
 
 def test_registry_ignores_ordinary_prompts_and_skill_expansion(tmp_path: Path) -> None:
@@ -173,6 +177,20 @@ def test_context_lists_active_context_files(tmp_path: Path) -> None:
     assert result.message is not None
     assert "Active project context files:" in result.message
     assert f"- {tmp_path / 'AGENTS.md'}" in result.message
+
+
+def test_reload_command_refreshes_session_resources(tmp_path: Path) -> None:
+    session = FakeSession(tmp_path)
+
+    result = create_default_command_registry().execute(session, "/reload")
+
+    assert result.message is not None
+    assert "Reloaded resources and provider configuration." in result.message
+    assert "Skills: 1" in result.message
+    assert "Prompt templates: 0" in result.message
+    assert "Context files: 1" in result.message
+    assert "Providers: 2" in result.message
+    assert session.reload_called is True
 
 
 def test_sessions_lists_indexed_sessions(tmp_path: Path) -> None:

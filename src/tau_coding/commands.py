@@ -56,6 +56,8 @@ class CommandSession(Protocol):
 
     def set_provider(self, provider_name: str) -> None: ...
 
+    def reload(self) -> None: ...
+
 
 @dataclass(frozen=True, slots=True)
 class CommandResult:
@@ -198,6 +200,14 @@ def create_default_command_registry() -> CommandRegistry:
     )
     registry.register(
         SlashCommand(
+            name="reload",
+            usage="/reload",
+            description="Reload resources and provider configuration.",
+            handler=_reload_command,
+        )
+    )
+    registry.register(
+        SlashCommand(
             name="context",
             usage="/context",
             description="Show active project context files.",
@@ -310,6 +320,26 @@ def _resources_command(context: CommandContext) -> CommandResult:
     else:
         lines.append("Resource diagnostics: none")
     return CommandResult(handled=True, message="\n".join(lines))
+
+
+def _reload_command(context: CommandContext) -> CommandResult:
+    try:
+        context.session.reload()
+    except ValueError as exc:
+        return CommandResult(handled=True, message=f"Could not reload: {exc}")
+
+    session = context.session
+    return CommandResult(
+        handled=True,
+        message=(
+            "Reloaded resources and provider configuration.\n"
+            f"Skills: {len(session.skills)}\n"
+            f"Prompt templates: {len(session.prompt_templates)}\n"
+            f"Context files: {len(session.context_files)}\n"
+            f"Providers: {len(session.available_providers)}\n"
+            f"Resource diagnostics: {len(session.resource_diagnostics)}"
+        ),
+    )
 
 
 def _context_command(context: CommandContext) -> CommandResult:

@@ -27,6 +27,7 @@ from tau_coding.prompt_templates import (
 from tau_coding.provider_config import (
     ProviderConfigError,
     ProviderSettings,
+    load_provider_settings,
     openai_compatible_config_from_provider,
 )
 from tau_coding.resources import (
@@ -43,6 +44,16 @@ from tau_coding.system_prompt import (
     build_system_prompt,
 )
 from tau_coding.tools import create_coding_tools
+
+
+@dataclass(frozen=True, slots=True)
+class SessionResources:
+    """Tau-owned resources loaded around a coding session."""
+
+    skills: tuple[Skill, ...]
+    prompt_templates: tuple[PromptTemplate, ...]
+    context_files: tuple[ProjectContextFile, ...]
+    diagnostics: tuple[ResourceDiagnostic, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +109,7 @@ class CodingSession:
         self._command_registry = command_registry or create_default_command_registry()
         self._provider_name = config.provider_name
         self._provider_settings = config.provider_settings
+        self._resource_paths = resource_paths_with_cwd(config.resource_paths, config.cwd)
         self._owned_providers: list[OpenAICompatibleProvider] = []
 
     @classmethod
@@ -119,19 +131,7 @@ class CodingSession:
         )
         tools = config.tools if config.tools is not None else create_coding_tools(cwd=config.cwd)
         resource_paths = resource_paths_with_cwd(config.resource_paths, config.cwd)
-        loaded_skills, skill_diagnostics = load_skills_with_diagnostics(resource_paths)
-        loaded_prompt_templates, prompt_diagnostics = load_prompt_templates_with_diagnostics(
-            resource_paths
-        )
-        discovered_context, context_diagnostics = discover_project_context_with_diagnostics(
-            resource_paths
-        )
-        skills = tuple(loaded_skills)
-        prompt_templates = tuple(loaded_prompt_templates)
-        context_files = _merge_context_files(config.context_files, discovered_context)
-        resource_diagnostics = tuple(
-            [*skill_diagnostics, *prompt_diagnostics, *context_diagnostics]
-        )
+        resources = _load_session_resources(resource_paths, config.context_files)
         system = (
             config.system
             if config.system is not None
@@ -139,10 +139,10 @@ class CodingSession:
                 BuildSystemPromptOptions(
                     cwd=config.cwd,
                     tools=tools,
-                    skills=skills,
+                    skills=resources.skills,
                     custom_prompt=config.custom_system_prompt,
                     append_system_prompt=config.append_system_prompt,
-                    context_files=context_files,
+                    context_files=resources.context_files,
                 )
             )
         )
@@ -160,10 +160,10 @@ class CodingSession:
             state=state,
             harness=harness,
             last_parent_id=_last_parent_id_from_state(state),
-            skills=skills,
-            prompt_templates=prompt_templates,
-            context_files=context_files,
-            resource_diagnostics=resource_diagnostics,
+            skills=resources.skills,
+            prompt_templates=resources.prompt_templates,
+            context_files=resources.context_files,
+            resource_diagnostics=resources.diagnostics,
             command_registry=config.command_registry,
         )
 
@@ -194,7 +194,10 @@ class CodingSession:
         """Return configured model names for the active provider."""
         if self._provider_settings is None:
             return (self.model,)
-        provider = self._provider_settings.get_provider(self._provider_name)
+        try:
+            provider = self._provider_settings.get_provider(self._provider_name)
+        except ProviderConfigError:
+            return (self.model,)
         return provider.models
 
     @property
@@ -283,6 +286,27 @@ class CodingSession:
         self._provider_name = provider_config.name
         self.set_model(provider_config.default_model)
 
+    def reload(self) -> None:
+        """Reload Tau-owned resources and provider settings for future turns."""
+        resources = _load_session_resources(self._resource_paths, self._config.context_files)
+        self._skills = resources.skills
+        self._prompt_templates = resources.prompt_templates
+        self._context_files = resources.context_files
+        self._resource_diagnostics = resources.diagnostics
+        if self._provider_settings is not None:
+            self._provider_settings = load_provider_settings()
+        if self._config.system is None:
+            self._harness.config.system = build_system_prompt(
+                BuildSystemPromptOptions(
+                    cwd=self._config.cwd,
+                    tools=self._harness.config.tools,
+                    skills=self._skills,
+                    custom_prompt=self._config.custom_system_prompt,
+                    append_system_prompt=self._config.append_system_prompt,
+                    context_files=self._context_files,
+                )
+            )
+
     async def aclose(self) -> None:
         """Close runtime providers created by this coding session."""
         for provider in self._owned_providers:
@@ -345,6 +369,25 @@ def _last_parent_id_from_state(state: SessionState) -> str | None:
     if state.entries:
         return state.entries[-1].id
     return None
+
+
+def _load_session_resources(
+    resource_paths: TauResourcePaths,
+    explicit_context_files: tuple[ProjectContextFile, ...],
+) -> SessionResources:
+    loaded_skills, skill_diagnostics = load_skills_with_diagnostics(resource_paths)
+    loaded_prompt_templates, prompt_diagnostics = load_prompt_templates_with_diagnostics(
+        resource_paths
+    )
+    discovered_context, context_diagnostics = discover_project_context_with_diagnostics(
+        resource_paths
+    )
+    return SessionResources(
+        skills=tuple(loaded_skills),
+        prompt_templates=tuple(loaded_prompt_templates),
+        context_files=_merge_context_files(explicit_context_files, discovered_context),
+        diagnostics=tuple([*skill_diagnostics, *prompt_diagnostics, *context_diagnostics]),
+    )
 
 
 def _merge_context_files(
