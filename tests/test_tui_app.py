@@ -199,6 +199,32 @@ async def test_tui_app_mounts_sidebar_and_transcript() -> None:
         assert app.query_one("#prompt") is not None
 
 
+@pytest.mark.anyio
+async def test_tui_transcript_reflows_when_terminal_resizes() -> None:
+    app = TauTuiApp(
+        FakeSession(
+            messages=[
+                UserMessage(
+                    content=(
+                        "Please summarize this very long sentence that should wrap cleanly "
+                        "inside the transcript when the terminal becomes narrower."
+                    )
+                )
+            ]
+        )
+    )
+
+    async with app.run_test(size=(120, 30)) as pilot:
+        transcript = app.query_one("#transcript")
+        assert transcript.virtual_size.width <= transcript.scrollable_content_region.width
+
+        await pilot.resize_terminal(width=64, height=30)
+        await pilot.pause()
+
+        assert transcript.virtual_size.width <= transcript.scrollable_content_region.width
+        assert transcript.scroll_offset.x == 0
+
+
 def test_tui_app_uses_configured_theme_css_variables() -> None:
     app = TauTuiApp(FakeSession(), tui_settings=TuiSettings(theme="high-contrast"))
 

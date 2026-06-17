@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from pathlib import Path
 from re import search
-from typing import Protocol
+from typing import Any, Protocol
 
 from rich import box
 from rich.console import Group, RenderableType
@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
+from textual.events import Resize
 from textual.widgets import RichLog, Static
 
 from tau_agent.tools import AgentTool
@@ -60,6 +61,12 @@ class SessionSidebar(Static):
 class TranscriptView(RichLog):
     """Scrollable transcript view backed by ``TuiState``."""
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._render_state: TuiState | None = None
+        self._render_theme: TuiTheme = TAU_DARK_THEME
+        self._last_render_width = 0
+
     def update_from_state(
         self,
         state: TuiState,
@@ -67,13 +74,35 @@ class TranscriptView(RichLog):
         theme: TuiTheme = TAU_DARK_THEME,
     ) -> None:
         """Redraw the transcript from display state."""
+        self._render_state = state
+        self._render_theme = theme
+        self._redraw(scroll_end=True)
+
+    def on_resize(self, event: Resize) -> None:
+        """Re-render transcript entries when the terminal width changes."""
+        super().on_resize(event)
+        if self._render_state is None:
+            return
+        width = self.scrollable_content_region.width
+        if width <= 0 or width == self._last_render_width:
+            return
+        was_at_end = self.is_vertical_scroll_end
+        self._redraw(scroll_end=was_at_end)
+        self.scroll_to(x=0, animate=False, immediate=True)
+
+    def _redraw(self, *, scroll_end: bool) -> None:
+        state = self._render_state
+        if state is None:
+            return
+        theme = self._render_theme
+        self._last_render_width = self.scrollable_content_region.width
         self.clear()
         for item in state.items:
             self.write(
                 render_chat_item(item, theme=theme),
                 expand=True,
                 shrink=True,
-                scroll_end=True,
+                scroll_end=scroll_end,
             )
         if state.assistant_buffer:
             self.write(
@@ -83,7 +112,7 @@ class TranscriptView(RichLog):
                 ),
                 expand=True,
                 shrink=True,
-                scroll_end=True,
+                scroll_end=scroll_end,
             )
 
 
