@@ -319,6 +319,8 @@ class TauTuiApp(App[None]):
             command_registry=registry,
             skills=self.session.skills,
             prompt_templates=self.session.prompt_templates,
+            model_names=self.session.available_models,
+            provider_names=self.session.available_providers,
         )
 
 

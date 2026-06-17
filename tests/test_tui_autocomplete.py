@@ -60,3 +60,29 @@ def test_completion_selection_wraps() -> None:
     assert len(state.items) > 1
     assert state.select_previous().selected_index == len(state.items) - 1
     assert state.select_next().selected_index == 1
+
+
+def test_model_argument_completion_preserves_existing_text() -> None:
+    state = build_completion_state(
+        "/model fak continue",
+        command_registry=create_default_command_registry(),
+        skills=(),
+        prompt_templates=(),
+        model_names=("fake-model", "other-model"),
+    )
+
+    assert [item.display for item in state.items] == ["fake-model"]
+    assert state.selected is not None
+    assert state.selected.apply("/model fak continue") == "/model fake-model continue"
+
+
+def test_provider_argument_completion_uses_available_providers() -> None:
+    state = build_completion_state(
+        "/provider lo",
+        command_registry=create_default_command_registry(),
+        skills=(),
+        prompt_templates=(),
+        provider_names=("openai", "local"),
+    )
+
+    assert [item.display for item in state.items] == ["local"]

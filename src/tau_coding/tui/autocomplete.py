@@ -62,6 +62,8 @@ def build_completion_state(
     command_registry: CommandRegistry,
     skills: Sequence[Skill],
     prompt_templates: Sequence[PromptTemplate],
+    model_names: Sequence[str] = (),
+    provider_names: Sequence[str] = (),
 ) -> CompletionState:
     """Build autocomplete suggestions for the current prompt text."""
     del prompt_templates
@@ -75,6 +77,15 @@ def build_completion_state(
 
     if ":" in token:
         return CompletionState()
+
+    argument_completions = _command_argument_completions(
+        text=text,
+        token_end=token_end,
+        model_names=model_names,
+        provider_names=provider_names,
+    )
+    if argument_completions is not None:
+        return CompletionState(argument_completions)
 
     return CompletionState(
         _command_completions(token=token, token_end=token_end, registry=command_registry)
@@ -134,6 +145,57 @@ def _skill_completions(
     return tuple(suggestions)
 
 
+def _command_argument_completions(
+    *,
+    text: str,
+    token_end: int,
+    model_names: Sequence[str],
+    provider_names: Sequence[str],
+) -> tuple[CompletionItem, ...] | None:
+    if token_end >= len(text):
+        return None
+
+    command_name = text[:token_end].removeprefix("/").lower()
+    if command_name == "model":
+        return _value_completions(
+            text=text,
+            start=token_end + 1,
+            values=model_names,
+            description="Switch model",
+        )
+    if command_name == "provider":
+        return _value_completions(
+            text=text,
+            start=token_end + 1,
+            values=provider_names,
+            description="Switch provider",
+        )
+    return None
+
+
+def _value_completions(
+    *, text: str, start: int, values: Sequence[str], description: str
+) -> tuple[CompletionItem, ...]:
+    end = _argument_token_end(text, start)
+    prefix = text[start:end].lower()
+    return tuple(
+        CompletionItem(
+            display=value,
+            replacement=value,
+            start=start,
+            end=end,
+            description=description,
+        )
+        for value in sorted(values)
+        if value.lower().startswith(prefix)
+    )
+
+
 def _first_token_end(text: str) -> int:
     separator = text.find(" ")
+    return len(text) if separator == -1 else separator
+
+
+def _argument_token_end(text: str, start: int) -> int:
+    separator = text.find(" ", start)
     return len(text) if separator == -1 else separator

@@ -24,6 +24,10 @@ prompt, inserts `/`, and shows all slash-command completions using the existing
 completion engine. Selection still uses the same `Tab`, `Up`, and `Down`
 bindings as ordinary slash-command autocomplete.
 
+The same completion engine now suggests available values for `/model` and
+`/provider` arguments. This gives the prompt a lightweight picker for model and
+provider switching without adding a separate modal UI.
+
 ## Boundaries
 
 These changes live in `tau_coding.tui`. The command registry still owns command
@@ -32,7 +36,7 @@ commands, and rendering.
 
 ## Still deferred
 
-The larger Phase 23 roadmap still includes richer model/session pickers, a diff
+The larger Phase 23 roadmap still includes richer session pickers, a diff
 viewer, configurable keybindings, and deeper theme polish. Those should remain
 separate atomic slices.
 

@@ -203,6 +203,21 @@ async def test_tui_app_completes_skill_name() -> None:
 
 
 @pytest.mark.anyio
+async def test_tui_app_completes_model_argument() -> None:
+    app = TauTuiApp(FakeSession())
+
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt")
+        prompt.value = "/model fak"
+        app._completion_state = app._build_completion_state(prompt.value)
+        app._refresh_completions()
+
+        await pilot.press("tab")
+
+        assert prompt.value == "/model fake-model"
+
+
+@pytest.mark.anyio
 async def test_tui_app_cycles_completion_selection() -> None:
     app = TauTuiApp(FakeSession())
 
