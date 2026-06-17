@@ -20,6 +20,15 @@ def test_parse_frontmatter_description() -> None:
     assert body == "# Testing\nUse pytest."
 
 
+def test_parse_frontmatter_normalizes_crlf_line_endings() -> None:
+    metadata, body = parse_markdown_resource(
+        "---\r\ndescription: Write tests\r\n---\r\n# Testing\r\nUse pytest."
+    )
+
+    assert metadata == {"description": "Write tests"}
+    assert body == "# Testing\nUse pytest."
+
+
 def test_derive_description_uses_first_heading_or_paragraph() -> None:
     assert derive_description("\n# Title\nBody") == "Title"
     assert derive_description("\nFirst paragraph\nMore") == "First paragraph"

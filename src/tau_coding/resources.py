@@ -33,15 +33,16 @@ def parse_markdown_resource(text: str) -> tuple[dict[str, str], str]:
     Only simple `key: value` pairs are supported. This keeps resource parsing
     dependency-free and avoids evaluating arbitrary code.
     """
-    if not text.startswith("---\n"):
-        return {}, text
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    if not normalized.startswith("---\n"):
+        return {}, normalized
 
-    end = text.find("\n---", 4)
+    end = normalized.find("\n---", 4)
     if end == -1:
-        return {}, text
+        return {}, normalized
 
-    raw_frontmatter = text[4:end]
-    body = text[end + len("\n---") :]
+    raw_frontmatter = normalized[4:end]
+    body = normalized[end + len("\n---") :]
     if body.startswith("\n"):
         body = body[1:]
 
