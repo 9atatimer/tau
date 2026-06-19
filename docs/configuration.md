@@ -152,8 +152,10 @@ skills, prompt templates, and context files such as `AGENTS.md`.
 Transcript text supports Textual selection for visible user, assistant, tool, and
 error output. Copy shortcuts are terminal-emulator dependent, and selecting the
 full visible row can include Tau's left accent marker.
-Use `Alt+Up` / `Alt+Down` to select transcript messages and `Ctrl+C` to copy the
-selected message text through Textual's terminal clipboard integration.
+When visible transcript text is selected, `Ctrl+C` copies that selection through
+Textual's terminal clipboard integration. Without a visible selection, use
+`Alt+Up` / `Alt+Down` to select transcript messages and `Ctrl+C` to copy the
+selected message text.
 
 Any omitted keybinding uses the built-in default. Key names use Textual's key
 syntax, such as `ctrl+k`, `tab`, `shift+tab`, `down`, `up`, and `f2`. Tau rejects unknown
