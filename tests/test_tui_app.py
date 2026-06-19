@@ -1662,14 +1662,16 @@ async def test_tui_login_method_picker_supports_arrow_keys() -> None:
         assert app.screen.focused is method_list
         assert method_list.index == 0
 
-        app.screen.action_cursor_down()
+        await pilot.press("down")
+        await pilot.pause()
         assert method_list.index == 1
 
-        app.screen.action_cursor_up()
+        await pilot.press("up")
+        await pilot.pause()
         assert method_list.index == 0
 
-        app.screen.action_cursor_down()
-        app.screen.action_select_cursor()
+        await pilot.press("down")
+        await pilot.press("enter")
         await pilot.pause()
 
         assert isinstance(app.screen, LoginProviderPickerScreen)
