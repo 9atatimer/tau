@@ -456,20 +456,11 @@ def create_bash_tool_definition(*, cwd: str | Path | None = None) -> ToolDefinit
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
-        timed_out = False
-        cancelled = False
-        output_bytes = b""
-        _stderr: bytes | None = None
-        try:
-            output_bytes, _stderr = await _communicate_with_cancellation(
-                process,
-                timeout=timeout,
-                signal=signal,
-            )
-        except TimeoutError:
-            timed_out = True
-        except asyncio.CancelledError:
-            cancelled = True
+        output_bytes, _stderr, timed_out, cancelled = await _communicate_with_cancellation(
+            process,
+            timeout=timeout,
+            signal=signal,
+        )
 
         output = output_bytes.decode(errors="replace")
         truncation = truncate_tail(output)
@@ -575,33 +566,39 @@ async def _communicate_with_cancellation(
     *,
     timeout: float | None,
     signal: ToolCancellationToken | None,
-) -> tuple[bytes, bytes | None]:
+) -> tuple[bytes, bytes | None, bool, bool]:
     communicate = asyncio.create_task(process.communicate())
+    cancel_watch: asyncio.Task[None] | None = None
     try:
-        if signal is None:
-            return await asyncio.wait_for(communicate, timeout=timeout)
+        wait_for = {communicate}
+        if signal is not None:
+            cancel_watch = asyncio.create_task(_wait_for_cancel(signal))
+            wait_for.add(cancel_watch)
 
-        cancel_watch = asyncio.create_task(_wait_for_cancel(signal))
+        done, _pending = await asyncio.wait(
+            wait_for,
+            timeout=timeout,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if communicate in done:
+            output_bytes, stderr = communicate.result()
+            return output_bytes, stderr, False, False
+
+        cancelled = cancel_watch is not None and cancel_watch in done
+        _kill_process_tree(process)
         try:
-            done, _pending = await asyncio.wait(
-                {communicate, cancel_watch},
-                timeout=timeout,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if communicate in done:
-                return communicate.result()
-            if cancel_watch in done:
-                _kill_process_tree(process)
-                await process.wait()
-                raise asyncio.CancelledError
-            _kill_process_tree(process)
-            await process.wait()
-            raise TimeoutError
-        finally:
-            cancel_watch.cancel()
-    finally:
+            output_bytes, stderr = await communicate
+        except asyncio.CancelledError:
+            output_bytes, stderr = b"", None
+        return output_bytes, stderr, not cancelled, cancelled
+    except asyncio.CancelledError:
+        _kill_process_tree(process)
         if not communicate.done():
             communicate.cancel()
+        raise
+    finally:
+        if cancel_watch is not None:
+            cancel_watch.cancel()
 
 
 async def _wait_for_cancel(signal: ToolCancellationToken) -> None:

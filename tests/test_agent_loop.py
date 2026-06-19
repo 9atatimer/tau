@@ -244,6 +244,60 @@ async def test_agent_loop_passes_cancellation_signal_to_tools() -> None:
 
 
 @pytest.mark.anyio
+async def test_agent_loop_records_cancelled_results_for_skipped_tool_calls() -> None:
+    async def executor(
+        arguments: Mapping[str, JSONValue],
+        signal: SimpleCancellationToken | None = None,
+    ) -> AgentToolResult:
+        del arguments
+        if signal is not None:
+            signal.cancel()
+        return AgentToolResult(tool_call_id="call-1", name="read", ok=True, content="ok")
+
+    tool = AgentTool(
+        name="read",
+        description="Read a file.",
+        input_schema={"type": "object"},
+        executor=executor,
+    )
+    tool_calls = [
+        ToolCall(id="call-1", name="read", arguments={"path": "README.md"}),
+        ToolCall(id="call-2", name="read", arguments={"path": "pyproject.toml"}),
+    ]
+    assistant = AssistantMessage(content="I'll read both.", tool_calls=tool_calls)
+    messages = [UserMessage(content="Read project files")]
+    provider = FakeProvider(
+        [[ProviderResponseStartEvent(model="fake"), ProviderResponseEndEvent(message=assistant)]]
+    )
+    signal = SimpleCancellationToken()
+
+    events = await _collect(
+        run_agent_loop(
+            provider=provider,
+            model="fake",
+            system="You are Tau.",
+            messages=messages,
+            tools=[tool],
+            signal=signal,
+        )
+    )
+
+    assert messages == [
+        UserMessage(content="Read project files"),
+        assistant,
+        ToolResultMessage(tool_call_id="call-1", name="read", content="ok", ok=True),
+        ToolResultMessage(
+            tool_call_id="call-2",
+            name="read",
+            content="Tool call cancelled",
+            ok=False,
+            error="Tool call cancelled",
+        ),
+    ]
+    assert [event.type for event in events].count("tool_execution_end") == 2
+
+
+@pytest.mark.anyio
 async def test_agent_loop_injects_steering_after_tool_batch() -> None:
     async def executor(arguments: Mapping[str, JSONValue]) -> AgentToolResult:
         return AgentToolResult(

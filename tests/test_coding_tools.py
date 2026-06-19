@@ -174,15 +174,20 @@ async def test_bash_tool_reports_timeout(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_bash_tool_timeout_kills_shell_children(tmp_path: Path) -> None:
     tool = create_bash_tool(cwd=tmp_path)
+    marker = tmp_path / "marker"
 
     start = monotonic()
-    result = await tool.execute({"command": "sleep 1 & wait", "timeout": 0.01})
+    result = await tool.execute(
+        {"command": "(sleep 0.25; touch marker) & wait", "timeout": 0.01}
+    )
     duration = monotonic() - start
+    await asyncio.sleep(0.35)
 
     assert result.ok is False
     assert result.data is not None
     assert result.data["timed_out"] is True
     assert duration < 0.5
+    assert not marker.exists()
 
 
 @pytest.mark.anyio
