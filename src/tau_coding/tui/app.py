@@ -70,7 +70,14 @@ from tau_coding.tui.widgets import (
 type BindingEntry = Binding | tuple[str, str] | tuple[str, str, str]
 SIDEBAR_MIN_WIDTH = 96
 SIDEBAR_MIN_HEIGHT = 24
-ACTIVITY_FRAMES = ("Working |", "Working /", "Working -", "Working \\")
+ACTIVITY_BORDER_CLASSES = (
+    "-agent-working-0",
+    "-agent-working-1",
+    "-agent-working-2",
+    "-agent-working-3",
+    "-agent-working-4",
+    "-agent-working-5",
+)
 
 
 class LoginRequiredProvider:
@@ -859,6 +866,30 @@ class TauTuiApp(App[None]):
         border: tall $tau-prompt-border;
     }
 
+    #prompt.-agent-working-0 {
+        border: tall #00ff66;
+    }
+
+    #prompt.-agent-working-1 {
+        border: tall #36d399;
+    }
+
+    #prompt.-agent-working-2 {
+        border: tall #22d3ee;
+    }
+
+    #prompt.-agent-working-3 {
+        border: tall #60a5fa;
+    }
+
+    #prompt.-agent-working-4 {
+        border: tall #a78bfa;
+    }
+
+    #prompt.-agent-working-5 {
+        border: tall #f472b6;
+    }
+
     #compact-session-info {
         height: auto;
         max-height: 3;
@@ -1619,24 +1650,34 @@ class TauTuiApp(App[None]):
                 )
             else:
                 self._activity_timer.resume()
+            self._apply_activity_border()
             return
         self._activity_frame = 0
         if self._activity_timer is not None:
             self._activity_timer.pause()
+        self._apply_activity_border()
 
     def _tick_activity(self) -> None:
         if not self.state.running:
             return
-        self._activity_frame = (self._activity_frame + 1) % len(ACTIVITY_FRAMES)
+        self._activity_frame = (self._activity_frame + 1) % len(ACTIVITY_BORDER_CLASSES)
+        self._apply_activity_border()
         status = self.query_one("#status", Static)
         status.update(self._status_text())
+
+    def _apply_activity_border(self) -> None:
+        prompt = self.query_one("#prompt", PromptInput)
+        active_class = (
+            ACTIVITY_BORDER_CLASSES[self._activity_frame] if self.state.running else None
+        )
+        for class_name in ACTIVITY_BORDER_CLASSES:
+            prompt.set_class(class_name == active_class, class_name)
 
     def _status_text(self) -> str:
         queue_text = _queue_status_text(self.state)
         if not self.state.running:
             return f"Ready | queued: {queue_text}" if queue_text else "Ready"
-        status = ACTIVITY_FRAMES[self._activity_frame]
-        return f"{status} | queued: {queue_text}" if queue_text else status
+        return f"queued: {queue_text}" if queue_text else ""
 
     def _refresh_completions(self) -> None:
         suggestions = self.query_one("#autocomplete", Static)

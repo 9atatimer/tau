@@ -703,27 +703,31 @@ def test_tui_app_loads_restored_messages_into_display_state() -> None:
 
 
 @pytest.mark.anyio
-async def test_tui_app_animates_activity_status_while_running() -> None:
+async def test_tui_app_animates_prompt_border_while_running() -> None:
     app = TauTuiApp(FakeSession())
 
     async with app.run_test():
+        prompt = app.query_one("#prompt")
         status = app.query_one("#status")
 
         assert str(status.render()) == "Ready"
+        assert not prompt.has_class("-agent-working-0")
 
         app.adapter.apply(AgentStartEvent())
         app._refresh()
 
-        assert str(status.render()) == "Working |"
+        assert str(status.render()) == ""
+        assert prompt.has_class("-agent-working-0")
 
         app._tick_activity()
 
-        assert str(status.render()) == "Working /"
+        assert prompt.has_class("-agent-working-1")
 
         app.adapter.apply(AgentEndEvent())
         app._refresh()
 
         assert str(status.render()) == "Ready"
+        assert not prompt.has_class("-agent-working-1")
 
 
 @pytest.mark.anyio
