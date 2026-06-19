@@ -9,7 +9,6 @@ from typing import Any, ClassVar, Literal, Protocol, cast
 
 from rich.console import Group
 from rich.text import Text
-from textual import events, on
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingsMap
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -254,7 +253,7 @@ class PromptInput(TextArea):
 
     def action_copy_selected_message(self) -> None:
         """Clear the current prompt before falling back to message copy."""
-        if self.selected_text or self.app.screen.get_selected_text():
+        if self.selected_text:
             return
         if self.text:
             self.text = ""
@@ -329,7 +328,7 @@ class PromptInput(TextArea):
             event.stop()
             self._completion_target().action_select_next_message()
         elif event.key == keybindings.copy_message:
-            if self.selected_text or self.app.screen.get_selected_text():
+            if self.selected_text:
                 return
             event.stop()
             event.prevent_default()
@@ -1199,19 +1198,6 @@ class TauTuiApp(App[None]):
         if self.initial_prompt and self.initial_prompt.strip():
             self._submit_prompt(self.initial_prompt.strip())
 
-    @on(events.TextSelected)
-    async def on_text_selected(self) -> None:
-        """Automatically copy visible transcript selections."""
-        selected_text = self._visible_selection_text()
-        if selected_text is None:
-            return
-        try:
-            self.copy_to_clipboard(selected_text)
-        except Exception as exc:  # noqa: BLE001 - terminal clipboard support varies
-            self._notify(f"Could not copy selection: {exc}", severity="error")
-            return
-        self._notify("Copied selected text.")
-
     def on_unmount(self) -> None:
         """Stop the activity timer when the app is torn down."""
         if self._activity_timer is not None:
@@ -1487,12 +1473,6 @@ class TauTuiApp(App[None]):
         if item.role == "tool" and self.state.show_tool_results and item.tool_result_text:
             return f"{item.text}\n\n{item.tool_result_text}"
         return item.text
-
-    def _visible_selection_text(self) -> str | None:
-        selected_text = self.screen.get_selected_text()
-        if selected_text is None or not selected_text.strip():
-            return None
-        return selected_text
 
     def _handle_session_picker_result(self, session_id: str | None) -> None:
         if session_id is None:

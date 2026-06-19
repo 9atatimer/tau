@@ -116,11 +116,10 @@ completions are open, and switches again while an agent turn is running. Tau
 does not add a separate custom hint row; the built-in bottom toolbar remains the
 single shortcut surface.
 
-Transcript copying now prefers visible terminal selection. If the user selects
-visible transcript text and presses the copy shortcut, Tau copies that selected
-text through Textual's terminal clipboard integration. When there is no visible
-selection, the same shortcut falls back to the selected-message workflow driven
-by the message navigation bindings.
+Transcript message copying uses keyboard-driven message selection. Users can
+move the selected transcript message with `Alt+Up` / `Alt+Down`, then press
+`Ctrl+C` to copy that message. Fine-grained mouse selection inside transcript
+messages needs a larger transcript-widget refactor and is tracked separately.
 
 Assistant code block rendering is now more defensive. Known fence languages use
 Rich/Pygments syntax highlighting, while unknown or custom fence labels fall
@@ -167,11 +166,8 @@ uv run tau
    and confirm the footer switches to steer, follow-up, cancel, thinking, tools,
    and copy actions. There should not be a second custom shortcut row above the
    footer.
-4. Check visible selection copy by selecting part of a transcript message with
-   the terminal mouse selection and pressing `Ctrl+C`. Paste into another buffer
-   and confirm only the selected visible text was copied. Then clear the
-   selection, use `Alt+Up` or `Alt+Down` to select a message, press `Ctrl+C`,
-   and confirm the whole selected message copies.
+4. Check transcript message copy by using `Alt+Up` or `Alt+Down` to select a
+   message, pressing `Ctrl+C`, and confirming the whole selected message copies.
 5. Check code block rendering by asking the model for one fenced `python` block
    and one fenced block with an unknown language such as
    `not-a-real-language`. The Python block should be highlighted, and the

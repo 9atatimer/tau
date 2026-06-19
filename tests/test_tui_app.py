@@ -6,11 +6,7 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 from rich.panel import Panel
-from rich.segment import Segment
 from textual.containers import VerticalScroll
-from textual.geometry import Offset
-from textual.selection import Selection
-from textual.strip import Strip
 from textual.widgets import Button, Footer, Input, Label, ListView, TextArea
 
 from tau_agent import (
@@ -469,48 +465,6 @@ def test_tool_chat_items_color_status_metadata_not_tool_name_or_results() -> Non
     assert f"{white};48;2;0;0;0m✗ bash" in error_output
     assert f"{red};48;2;0;0;0m✗ bash" not in error_output
     assert f"{red};48;2;0;0;0mfailed" not in error_output
-
-
-@pytest.mark.anyio
-async def test_transcript_view_exposes_visible_text_selection() -> None:
-    tool_call = ToolCall(
-        id="call-1",
-        name="bash",
-        arguments={"command": "printf hello", "timeout": 5},
-    )
-    app = TauTuiApp(
-        FakeSession(
-            messages=(
-                UserMessage(content="Run the command"),
-                AssistantMessage(content="I will run it.", tool_calls=(tool_call,)),
-                ToolResultMessage(
-                    tool_call_id="call-1",
-                    name="bash",
-                    ok=True,
-                    content="hello\nworld",
-                ),
-            )
-        )
-    )
-
-    async with app.run_test(size=(120, 30)) as pilot:
-        app.state.show_tool_results = True
-        app.state.add_item("error", "Error: provider failed")
-        app._refresh()
-        await pilot.pause()
-
-        transcript = app.query_one("#transcript", TranscriptView)
-        transcript.text_select_all()
-        await pilot.pause()
-
-        selected = app.screen.get_selected_text()
-        assert selected is not None
-        assert "Run the command" in selected
-        assert "I will run it." in selected
-        assert "$ printf hello" in selected
-        assert "hello" in selected
-        assert "world" in selected
-        assert "Error: provider failed" in selected
 
 
 def test_assistant_chat_items_render_markdown_lists() -> None:
@@ -1838,71 +1792,6 @@ async def test_tui_app_copies_selected_transcript_messages() -> None:
         "Copied selected message.",
         "Copied selected message.",
     ]
-
-
-@pytest.mark.anyio
-async def test_tui_app_copies_visible_transcript_selection_first() -> None:
-    app = TauTuiApp(
-        FakeSession(
-            messages=(
-                UserMessage(content="User prompt"),
-                AssistantMessage(content="Assistant response\n\n```python\nprint('hi')\n```"),
-            )
-        )
-    )
-    copied: list[str] = []
-    notifications: list[str] = []
-
-    def fake_copy(text: str) -> None:
-        copied.append(text)
-
-    def fake_notify(message: str, **kwargs: object) -> None:
-        del kwargs
-        notifications.append(message)
-
-    app.copy_to_clipboard = fake_copy  # type: ignore[method-assign]
-    app._notify = fake_notify  # type: ignore[method-assign]
-
-    async with app.run_test() as pilot:
-        transcript = app.query_one("#transcript", TranscriptView)
-        transcript.text_select_all()
-        await app.on_text_selected()
-        await pilot.pause()
-
-    assert len(copied) == 1
-    assert "User prompt" in copied[0]
-    assert "Assistant response" in copied[0]
-    assert "print('hi')" in copied[0]
-    assert notifications == ["Copied selected text."]
-
-
-@pytest.mark.anyio
-async def test_tui_app_copy_shortcut_ignores_visible_selection() -> None:
-    app = TauTuiApp(FakeSession(messages=(UserMessage(content="User prompt"),)))
-    copied: list[str] = []
-    notifications: list[str] = []
-
-    def fake_copy(text: str) -> None:
-        copied.append(text)
-
-    def fake_notify(message: str, **kwargs: object) -> None:
-        del kwargs
-        notifications.append(message)
-
-    app.copy_to_clipboard = fake_copy  # type: ignore[method-assign]
-    app._notify = fake_notify  # type: ignore[method-assign]
-
-    async with app.run_test() as pilot:
-        transcript = app.query_one("#transcript", TranscriptView)
-        transcript.text_select_all()
-        await app.on_text_selected()
-        await pilot.pause()
-        await pilot.press("ctrl+c")
-        await pilot.pause()
-
-    assert len(copied) == 1
-    assert "User prompt" in copied[0]
-    assert notifications == ["Copied selected text."]
 
 
 @pytest.mark.anyio

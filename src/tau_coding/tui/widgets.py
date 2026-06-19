@@ -9,7 +9,6 @@ from pygments.lexers import get_lexer_by_name  # type: ignore[import-untyped]
 from pygments.util import ClassNotFound  # type: ignore[import-untyped]
 from rich.align import Align
 from rich.console import Console, Group, RenderableType
-from rich.segment import Segment
 from rich.markdown import Markdown
 from rich.padding import Padding
 from rich.rule import Rule
@@ -19,8 +18,6 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 from textual.events import Resize
-from textual.strip import Strip
-from textual.selection import Selection
 from textual.widgets import RichLog, Static
 
 from tau_agent.tools import AgentTool
@@ -126,37 +123,6 @@ class TranscriptView(RichLog):
         self._redraw(scroll_end=was_at_end)
         self.scroll_to(x=0, animate=False, immediate=True)
 
-    def selection_updated(self, selection: Selection | None) -> None:
-        """Refresh visible rows when Textual's screen selection changes."""
-        self._line_cache.clear()
-        self.refresh()
-
-    def render_line(self, y: int) -> Strip:
-        """Render one transcript row with Textual selection styling applied."""
-        strip = super().render_line(y)
-        selection = self.text_selection
-        if selection is None:
-            return strip
-        span = selection.get_span(self.scroll_offset.y + y)
-        if span is None:
-            return strip
-        start, end = span
-        if start == end:
-            return strip
-        if end < 0:
-            end = strip.cell_length
-        start = max(0, start - self.scroll_offset.x)
-        end = min(strip.cell_length, end - self.scroll_offset.x)
-        if start >= end:
-            return strip
-        selection_style = self.selection_style
-        before, selected, after = strip.divide([start, end, strip.cell_length])
-        selected_segments = [
-            Segment(text, (style or Style()) + selection_style, control)
-            for text, style, control in selected._segments
-        ]
-        return Strip([*before._segments, *selected_segments, *after._segments], strip.cell_length)
-
     def _redraw(self, *, scroll_end: bool) -> None:
         state = self._render_state
         if state is None:
@@ -189,13 +155,6 @@ class TranscriptView(RichLog):
                 shrink=True,
                 scroll_end=scroll_end,
             )
-
-    def get_selection(self, selection: Selection) -> tuple[str, str] | None:
-        """Return selected transcript text from RichLog's rendered line buffer."""
-        if not self.lines:
-            return None
-        text = "\n".join(line.text.rstrip() for line in self.lines)
-        return selection.extract(text), "\n"
 
 
 def render_session_sidebar(

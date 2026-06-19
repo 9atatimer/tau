@@ -157,13 +157,9 @@ follow-ups, and copy actions. The visible footer bindings switch when
 autocomplete is open or an agent turn is running, so the bottom toolbar stays in
 Textual's standard footer instead of using a separate custom hint row.
 
-Transcript text supports Textual selection for visible user, assistant, tool, and
-error output. Copy shortcuts are terminal-emulator dependent, and selecting the
-full visible row can include Tau's left accent marker.
-When visible transcript text is selected, `Ctrl+C` copies that selection through
-Textual's terminal clipboard integration. Without a visible selection, use
-`Alt+Up` / `Alt+Down` to select transcript messages and `Ctrl+C` to copy the
-selected message text.
+Use `Alt+Up` / `Alt+Down` to select transcript messages and `Ctrl+C` to copy the
+selected message text. Fine-grained mouse selection inside transcript messages is
+not supported yet.
 
 Assistant Markdown renders fenced code blocks with syntax highlighting when the
 fence language is known. Unknown fence languages fall back to plain code
