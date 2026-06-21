@@ -683,6 +683,53 @@ async def test_session_branch_restores_model_from_selected_path(tmp_path: Path) 
 @pytest.mark.anyio
 async def test_session_branch_with_summary_rebuilds_context(tmp_path: Path) -> None:
     storage = JsonlSessionStorage(tmp_path / "session.jsonl")
+    provider = FakeProvider(
+        [
+            [
+                ProviderResponseStartEvent(model="fake"),
+                ProviderResponseEndEvent(
+                    message=AssistantMessage(content="The abandoned branch went left.")
+                ),
+            ]
+        ]
+    )
+    root = MessageEntry(id="root", message=UserMessage(content="Root"))
+    left = MessageEntry(id="left", parent_id="root", message=AssistantMessage(content="Left"))
+    right = MessageEntry(
+        id="right",
+        parent_id="left",
+        message=UserMessage(content="Abandoned follow-up"),
+    )
+    await storage.append(root)
+    await storage.append(left)
+    await storage.append(right)
+    await storage.append(LeafEntry(entry_id="right"))
+    session = await CodingSession.load(_config(tmp_path, provider, storage))
+
+    result = await session.branch_to_entry("root", summarize=True)
+    entries = await storage.read_all()
+    summary = entries[-2]
+
+    assert "with branch summary" in result
+    assert summary.type == "branch_summary"
+    assert summary.parent_id == "root"
+    assert summary.branch_root_id == "root"
+    assert summary.summary == "The abandoned branch went left."
+    assert provider.calls[0][3] == []
+    assert "Abandoned branch transcript:" in provider.calls[0][2][0].content
+    assert "Abandoned follow-up" in provider.calls[0][2][0].content
+    assert session.messages[0] == UserMessage(content="Root")
+    assert session.messages[1].role == "user"
+    assert isinstance(session.messages[1].content, str)
+    assert "Previous branch summary from root:" in session.messages[1].content
+    assert "The abandoned branch went left." in session.messages[1].content
+
+
+@pytest.mark.anyio
+async def test_session_branch_with_summary_falls_back_when_model_summary_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    storage = JsonlSessionStorage(tmp_path / "session.jsonl")
     root = MessageEntry(id="root", message=UserMessage(content="Root"))
     left = MessageEntry(id="left", parent_id="root", message=AssistantMessage(content="Left"))
     right = MessageEntry(
@@ -702,12 +749,8 @@ async def test_session_branch_with_summary_rebuilds_context(tmp_path: Path) -> N
 
     assert "with branch summary" in result
     assert summary.type == "branch_summary"
-    assert summary.parent_id == "root"
-    assert summary.branch_root_id == "root"
-    assert session.messages[0] == UserMessage(content="Root")
-    assert session.messages[1].role == "user"
-    assert isinstance(session.messages[1].content, str)
-    assert "Previous branch summary from root:" in session.messages[1].content
+    assert "Automatically compacted 2 prior message(s)." in summary.summary
+    assert "Abandoned follow-up" in summary.summary
     assert "Abandoned follow-up" in session.messages[1].content
 
 
