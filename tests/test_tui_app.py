@@ -7,6 +7,8 @@ import pytest
 from rich.console import Console
 from rich.panel import Panel
 from textual.containers import VerticalScroll
+from textual.geometry import Offset
+from textual.selection import SELECT_ALL, Selection
 from textual.widgets import Footer, Input, Label, ListItem, ListView, Static, TextArea
 
 from tau_agent import (
@@ -16,7 +18,9 @@ from tau_agent import (
     AgentToolResult,
     AssistantMessage,
     ErrorEvent,
+    MessageDeltaEvent,
     MessageEndEvent,
+    MessageStartEvent,
     QueueUpdateEvent,
     ToolCall,
     ToolExecutionEndEvent,
@@ -62,12 +66,15 @@ from tau_coding.tui.config import (
 )
 from tau_coding.tui.state import ChatItem
 from tau_coding.tui.widgets import (
+    StreamingTranscriptMessageWidget,
+    TranscriptMessageWidget,
     TranscriptView,
     _compact_token_count,
     _syntax_language,
     render_chat_item,
     render_compact_session_info,
     render_session_sidebar,
+    transcript_item_selection_text,
 )
 
 
@@ -715,6 +722,170 @@ def test_chat_items_preserve_malformed_fenced_code() -> None:
 
     assert "```python" in output
     assert 'print("hi")' in output
+
+
+@pytest.mark.anyio
+async def test_transcript_message_widget_extracts_partial_rendered_selection() -> None:
+    app = TauTuiApp(
+        FakeSession(
+            messages=[
+                UserMessage(content="alpha beta\ngamma"),
+            ]
+        )
+    )
+
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        widget = app.query_one(TranscriptMessageWidget)
+
+        assert widget.get_selection(Selection(Offset(8, 1), Offset(12, 1))) == (
+            "beta",
+            "\n",
+        )
+
+
+@pytest.mark.anyio
+async def test_tui_transcript_selects_only_one_message() -> None:
+    app = TauTuiApp(
+        FakeSession(
+            messages=[
+                UserMessage(content="first message"),
+                AssistantMessage(content="second message"),
+            ]
+        )
+    )
+
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        messages = list(app.query(TranscriptMessageWidget))
+
+        app.screen.selections = {messages[0]: SELECT_ALL}
+
+        assert app.screen.get_selected_text() == "first message"
+
+
+@pytest.mark.anyio
+async def test_tui_transcript_extracts_adjacent_message_selection() -> None:
+    app = TauTuiApp(
+        FakeSession(
+            messages=[
+                UserMessage(content="first one"),
+                AssistantMessage(content="middle message"),
+                UserMessage(content="third item"),
+            ]
+        )
+    )
+
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        messages = list(app.query(TranscriptMessageWidget))
+
+        app.screen.selections = {
+            messages[0]: Selection(Offset(8, 1), None),
+            messages[1]: SELECT_ALL,
+            messages[2]: Selection(None, Offset(7, 1)),
+        }
+
+        assert app.screen.get_selected_text() == "one\nmiddle message\nthird"
+
+
+@pytest.mark.anyio
+async def test_tui_auto_copies_selected_text_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = TauTuiApp(
+        FakeSession(messages=[UserMessage(content="copy this")]),
+        tui_settings=TuiSettings(auto_copy_selection=True),
+    )
+    copied: list[str] = []
+    monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
+
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        message = app.query_one(TranscriptMessageWidget)
+        app.screen.selections = {message: SELECT_ALL}
+
+        await app.on_text_selected()
+
+    assert copied == ["copy this"]
+
+
+@pytest.mark.anyio
+async def test_tui_auto_copy_selection_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = TauTuiApp(
+        FakeSession(messages=[UserMessage(content="do not copy")]),
+        tui_settings=TuiSettings(auto_copy_selection=False),
+    )
+    copied: list[str] = []
+    monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
+
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        message = app.query_one(TranscriptMessageWidget)
+        app.screen.selections = {message: SELECT_ALL}
+
+        await app.on_text_selected()
+
+    assert copied == []
+
+
+def test_transcript_selection_text_tracks_tool_result_visibility() -> None:
+    item = ChatItem(
+        role="tool",
+        text="→ read README.md",
+        tool_result_text="✓ read\nREADME contents",
+    )
+
+    assert transcript_item_selection_text(item, show_tool_results=False) == "→ read README.md"
+    assert transcript_item_selection_text(item, show_tool_results=True) == (
+        "→ read README.md\n\n✓ read\nREADME contents"
+    )
+
+
+@pytest.mark.anyio
+async def test_tui_message_start_does_not_mount_empty_assistant_message() -> None:
+    app = TauTuiApp(FakeSession())
+
+    async with app.run_test(size=(120, 30)) as pilot:
+        await app._apply_streaming_transcript_event(MessageStartEvent())
+        await pilot.pause()
+
+        assert list(app.query(StreamingTranscriptMessageWidget)) == []
+
+
+@pytest.mark.anyio
+async def test_tui_streaming_deltas_update_active_message_without_full_refresh() -> None:
+    session = FakeSession(
+        events=[
+            AgentStartEvent(),
+            MessageStartEvent(),
+            MessageDeltaEvent(delta="alpha "),
+            MessageDeltaEvent(delta="beta"),
+            MessageEndEvent(message=AssistantMessage(content="alpha beta")),
+            AgentEndEvent(),
+        ]
+    )
+    app = TauTuiApp(session)
+    full_refreshes = 0
+
+    original_refresh = app._refresh
+
+    def tracking_refresh() -> None:
+        nonlocal full_refreshes
+        full_refreshes += 1
+        original_refresh()
+
+    app._refresh = tracking_refresh  # type: ignore[method-assign]
+
+    async with app.run_test(size=(120, 30)) as pilot:
+        await app._run_prompt("stream")
+        await pilot.pause()
+
+        transcript = app.query_one("#transcript", TranscriptView)
+        streamed = app.query_one(StreamingTranscriptMessageWidget)
+        transcript_text = "\n".join(line.text for line in transcript.lines)
+
+    assert full_refreshes == 1
+    assert streamed.selection_text == "alpha beta"
+    assert "alpha beta" in transcript_text
 
 
 @pytest.mark.anyio
@@ -1704,6 +1875,20 @@ async def test_tui_app_deduplicates_active_notifications() -> None:
         ("Thinking controls are not available.", "warning"),
         ("Thinking controls are not available.", "error"),
     ]
+
+
+@pytest.mark.anyio
+async def test_tui_app_notifications_render_literal_markup_text() -> None:
+    app = TauTuiApp(FakeSession())
+
+    async with app.run_test(notifications=True) as pilot:
+        app._notify("Error: value [type=extra_forbidden]", severity="error")
+        await pilot.pause()
+
+        [notification] = tuple(app._notifications)
+
+    assert notification.message == "Error: value [type=extra_forbidden]"
+    assert notification.markup is False
 
 
 @pytest.mark.anyio

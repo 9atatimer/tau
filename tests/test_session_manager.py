@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from tau_coding.paths import TauPaths
@@ -57,6 +58,37 @@ def test_session_manager_returns_latest_session_for_cwd(tmp_path: Path) -> None:
     assert latest.id == older.id
     assert latest.model == "older"
     assert newer in manager.list_sessions(cwd)
+
+
+def test_session_manager_ignores_extra_index_metadata(tmp_path: Path) -> None:
+    manager = SessionManager(TauPaths(home=tmp_path / ".tau", agents_home=tmp_path / ".agents"))
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+    index_path = manager.project_index_path(cwd)
+    session_path = index_path.parent / "session-1.jsonl"
+    index_path.parent.mkdir(parents=True)
+    index_path.write_text(
+        json.dumps(
+            {
+                "id": "session-1",
+                "path": str(session_path),
+                "cwd": str(cwd.resolve()),
+                "model": "gpt-5",
+                "title": "Session",
+                "created_at": 1.0,
+                "updated_at": 2.0,
+                "provider_name": "openai-codex",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    [record] = manager.list_sessions(cwd)
+
+    assert record.id == "session-1"
+    assert record.path == session_path
+    assert record.model == "gpt-5"
 
 
 def test_session_manager_gets_or_creates_default_session(tmp_path: Path) -> None:

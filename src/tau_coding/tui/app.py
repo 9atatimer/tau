@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import suppress
 from datetime import datetime
 from inspect import isawaitable
 from pathlib import Path
@@ -9,9 +10,11 @@ from typing import Any, ClassVar, Literal, Protocol, cast
 
 from rich.console import Group
 from rich.text import Text
+from textual import events, on
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingsMap
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.events import Key, Resize
 from textual.screen import ModalScreen
 from textual.timer import Timer
@@ -28,7 +31,21 @@ from textual.widgets import (
 )
 from textual.worker import Worker
 
-from tau_agent import ErrorEvent
+from tau_agent import (
+    AgentEndEvent,
+    AgentEvent,
+    AgentStartEvent,
+    ErrorEvent,
+    MessageDeltaEvent,
+    MessageEndEvent,
+    MessageStartEvent,
+    QueueUpdateEvent,
+    RetryEvent,
+    ThinkingDeltaEvent,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
+    ToolExecutionUpdateEvent,
+)
 from tau_agent.messages import AgentMessage
 from tau_agent.tools import AgentTool
 from tau_ai import ProviderErrorEvent, ProviderEvent
@@ -1660,6 +1677,23 @@ class TauTuiApp(App[None]):
         self._activity_frame = 0
         self._activity_timer: Timer | None = None
         self._active_notification_keys: set[tuple[str, str]] = set()
+        self._supports_pyperclip: bool | None = None
+
+    def copy_to_clipboard(self, text: str) -> None:
+        """Copy text using pyperclip when available, then Textual's fallback."""
+        if self._supports_pyperclip is None:
+            try:
+                import pyperclip  # type: ignore[import-untyped]
+            except ImportError:
+                self._supports_pyperclip = False
+            else:
+                self._supports_pyperclip = True
+        if self._supports_pyperclip:
+            import pyperclip
+
+            with suppress(Exception):
+                pyperclip.copy(text)
+        super().copy_to_clipboard(text)
 
     def get_theme_variable_defaults(self) -> dict[str, str]:
         """Return Tau-specific CSS variables for the selected TUI theme."""
@@ -1714,6 +1748,16 @@ class TauTuiApp(App[None]):
     def on_resize(self, event: Resize) -> None:
         """Update responsive chrome when the terminal changes size."""
         self._update_responsive_layout(event.size.width, event.size.height)
+
+    @on(events.TextSelected)
+    async def on_text_selected(self) -> None:
+        """Optionally copy selected transcript text automatically."""
+        if not self.tui_settings.auto_copy_selection:
+            return
+        selection = self.screen.get_selected_text()
+        if selection:
+            self.copy_to_clipboard(selection)
+            self._notify("Copied selection to clipboard.")
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         """Update prompt autocomplete when the prompt text changes."""
@@ -1851,6 +1895,7 @@ class TauTuiApp(App[None]):
         self.tui_settings = TuiSettings(
             keybindings=self.tui_settings.keybindings,
             theme=theme,
+            auto_copy_selection=self.tui_settings.auto_copy_selection,
         )
         save_tui_settings(self.tui_settings)
         self.refresh_css(animate=False)
@@ -1881,7 +1926,7 @@ class TauTuiApp(App[None]):
                 self.adapter.apply(event)
                 if isinstance(event, ErrorEvent) and not event.recoverable:
                     _attach_diagnostic_log_path_to_error(self.state, self.session)
-                self._refresh()
+                await self._apply_streaming_transcript_event(event)
         except Exception as exc:  # noqa: BLE001 - surface unexpected worker errors in the TUI
             if active_run_id != self._prompt_run_id:
                 return
@@ -1893,6 +1938,74 @@ class TauTuiApp(App[None]):
         finally:
             if active_run_id == self._prompt_run_id:
                 self._prompt_worker = None
+
+    async def _apply_streaming_transcript_event(self, event: AgentEvent) -> None:
+        """Apply an agent event to mounted transcript widgets without full redraws."""
+        if not self.screen_stack:
+            self._refresh()
+            return
+        theme = self.tui_settings.resolved_theme
+        try:
+            transcript = self.query_one("#transcript", TranscriptView)
+        except NoMatches:
+            self._refresh()
+            return
+        if isinstance(event, AgentStartEvent):
+            self._refresh_chrome()
+            return
+        if isinstance(event, AgentEndEvent):
+            await transcript.finish_assistant_message()
+            self._refresh_chrome()
+            return
+        if isinstance(event, MessageStartEvent):
+            return
+        if isinstance(event, MessageDeltaEvent):
+            await transcript.append_assistant_delta(event.delta, theme=theme)
+            self._sync_activity_indicator()
+            return
+        if isinstance(event, ThinkingDeltaEvent):
+            await transcript.append_thinking_delta(
+                event.delta,
+                theme=theme,
+                show_thinking=self.state.show_thinking,
+            )
+            self._sync_activity_indicator()
+            return
+        if isinstance(event, MessageEndEvent):
+            if event.message.role == "user":
+                self._refresh()
+                return
+            if event.message.role == "assistant":
+                await transcript.finish_assistant_message(event.message.content)
+                self._refresh_chrome()
+                return
+            return
+        if isinstance(event, ToolExecutionStartEvent):
+            await transcript.finish_assistant_message()
+            await transcript.append_item(
+                self.state.items[-1],
+                theme=theme,
+                show_tool_results=self.state.show_tool_results,
+            )
+            self._refresh_chrome()
+            return
+        if isinstance(event, ToolExecutionUpdateEvent | RetryEvent | ErrorEvent):
+            await transcript.finish_assistant_message()
+            if self.state.items:
+                await transcript.append_item(
+                    self.state.items[-1],
+                    theme=theme,
+                    show_tool_results=self.state.show_tool_results,
+                )
+            self._refresh_chrome()
+            return
+        if isinstance(event, ToolExecutionEndEvent):
+            self._refresh()
+            return
+        if isinstance(event, QueueUpdateEvent):
+            self._refresh_chrome()
+            return
+        self._refresh_chrome()
 
     def action_cancel(self) -> None:
         """Cancel the active agent turn."""
@@ -2393,17 +2506,22 @@ class TauTuiApp(App[None]):
             lambda: self._active_notification_keys.discard(key),
             name=f"notification-dedupe-{hash(key)}",
         )
-        self.notify(message, severity=severity)
+        self.notify(message, severity=severity, markup=False)
 
     def _refresh(self) -> None:
         theme = self.tui_settings.resolved_theme
+        self._refresh_chrome(theme=theme)
+        transcript = self.query_one("#transcript", TranscriptView)
+        transcript.update_from_state(self.state, theme=theme)
+
+    def _refresh_chrome(self, *, theme: TuiTheme | None = None) -> None:
+        """Refresh non-transcript chrome without remounting transcript blocks."""
+        theme = theme or self.tui_settings.resolved_theme
         self._sync_queue_state()
         sidebar = self.query_one("#sidebar", SessionSidebar)
         sidebar.update_from_session(self.session, theme=theme)
         compact_info = self.query_one("#compact-session-info", CompactSessionInfo)
         compact_info.update_from_session(self.session, theme=theme)
-        transcript = self.query_one("#transcript", TranscriptView)
-        transcript.update_from_state(self.state, theme=theme)
         queued_messages = self.query_one("#queued-messages", Static)
         queued_messages.display = self.state.queued_message_count > 0
         queued_messages.update(_render_queued_messages(self.state, theme=theme))
@@ -2441,7 +2559,11 @@ class TauTuiApp(App[None]):
 
     def _apply_activity_indicator(self) -> None:
         theme = self.tui_settings.resolved_theme
-        prompt = self.query_one("#prompt", PromptInput)
+        try:
+            prompt = self.query_one("#prompt", PromptInput)
+            indicator = self.query_one("#activity-indicator", Static)
+        except NoMatches:
+            return
         prompt.styles.border = (
             "tall",
             _activity_prompt_border_color(
@@ -2451,7 +2573,6 @@ class TauTuiApp(App[None]):
                 shell_mode=_is_terminal_command_prompt(prompt.text),
             ),
         )
-        indicator = self.query_one("#activity-indicator", Static)
         indicator.update(
             _render_activity_indicator(
                 theme,
