@@ -227,6 +227,7 @@ class FakeSession:
 
     async def compact(self, summary: str) -> str:
         self.compact_summaries.append(summary)
+        self.messages = (UserMessage(content="Previous conversation summary:\nGenerated summary"),)
         self.context_token_estimate = 42
         return "Compacted 2 context entries."
 
@@ -583,6 +584,25 @@ def test_branch_summary_chat_items_expand_with_tool_results_toggle() -> None:
     assert "Detailed summary text" in expanded
 
 
+def test_compaction_summary_chat_items_expand_with_tool_results_toggle() -> None:
+    item = ChatItem(
+        role="compaction_summary",
+        text="Compaction summary (Ctrl+O to expand)",
+        tool_result_text="Detailed compaction text",
+    )
+    collapsed_console = Console(record=True, width=80)
+    collapsed_console.print(render_chat_item(item, show_tool_results=False))
+    collapsed = collapsed_console.export_text()
+    expanded_console = Console(record=True, width=80)
+    expanded_console.print(render_chat_item(item, show_tool_results=True))
+    expanded = expanded_console.export_text()
+
+    assert "Compaction summary (Ctrl+O to expand)" in collapsed
+    assert "Detailed compaction text" not in collapsed
+    assert "Compaction Summary" in expanded
+    assert "Detailed compaction text" in expanded
+
+
 def test_tui_state_compacts_branch_summary_messages() -> None:
     state = tui_app.TuiState()
 
@@ -599,6 +619,22 @@ def test_tui_state_compacts_branch_summary_messages() -> None:
 
     assert [(item.role, item.text, item.tool_result_text) for item in state.items] == [
         ("branch_summary", "Branch summary (Ctrl+O to expand)", "Important context.")
+    ]
+
+
+def test_tui_state_compacts_compaction_summary_messages() -> None:
+    state = tui_app.TuiState()
+
+    state.load_messages(
+        [UserMessage(content="Previous conversation summary:\nCompacted prior work.")]
+    )
+
+    assert [(item.role, item.text, item.tool_result_text) for item in state.items] == [
+        (
+            "compaction_summary",
+            "Compaction summary (Ctrl+O to expand)",
+            "Compacted prior work.",
+        )
     ]
 
 
@@ -1395,7 +1431,10 @@ async def test_tui_app_compact_command_runs_session_compaction() -> None:
         await pilot.press("enter")
 
         assert session.compact_summaries == ["Summary of earlier work."]
-        assert [(item.role, item.text) for item in app.state.items] == [("user", "Earlier")]
+        assert [(item.role, item.text) for item in app.state.items] == [
+            ("compaction_summary", "Compaction summary (Ctrl+O to expand)")
+        ]
+        assert app.state.items[0].tool_result_text == "Generated summary"
 
 
 @pytest.mark.anyio
