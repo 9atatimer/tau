@@ -507,7 +507,12 @@ def _name_command(context: CommandContext) -> CommandResult:
     except ValueError as exc:
         return CommandResult(handled=True, message=str(exc))
 
-    updated = manager.touch_session(session_id, model=context.session.model, title=name)
+    updated = manager.touch_session(
+        session_id,
+        model=context.session.model,
+        provider_name=context.session.provider_name,
+        title=name,
+    )
     if updated is None:
         return CommandResult(handled=True, message=f"Unknown current session: {session_id}")
     return CommandResult(handled=True, message=f"Session renamed: {updated.title}")

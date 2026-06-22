@@ -817,6 +817,22 @@ class CodingSession:
         if record is None:
             raise ValueError(f"Unknown session: {session_id}")
 
+        provider_name = self._provider_name
+        runtime_provider_config = self._runtime_provider_config
+        if record.provider_name:
+            if self._provider_settings is None:
+                raise ValueError(
+                    "Cannot resume session provider without provider settings: "
+                    f"{record.provider_name}"
+                )
+            try:
+                runtime_provider_config = self._provider_settings.get_provider(record.provider_name)
+            except ProviderConfigError as exc:
+                raise ValueError(
+                    f"Session provider is not configured: {record.provider_name}"
+                ) from exc
+            provider_name = runtime_provider_config.name
+
         replacement = await type(self).load(
             CodingSessionConfig(
                 provider=self._harness.config.provider,
@@ -831,9 +847,9 @@ class CodingSession:
                 session_id=record.id,
                 session_manager=manager,
                 command_registry=self._command_registry,
-                provider_name=self._provider_name,
+                provider_name=provider_name,
                 provider_settings=self._provider_settings,
-                runtime_provider_config=self._runtime_provider_config,
+                runtime_provider_config=runtime_provider_config,
                 auto_compact_token_threshold=self._auto_compact_token_threshold,
                 thinking_level=self._thinking_level,
             )
