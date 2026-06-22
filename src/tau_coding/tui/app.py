@@ -1801,7 +1801,10 @@ class TauTuiApp(App[None]):
             if command.theme is not None:
                 self._set_tui_theme(cast(TuiThemeName, command.theme))
             if command.message:
-                self._show_command_message(text, command.message)
+                if _command_message_uses_transcript(text):
+                    self._append_command_message(text, command.message)
+                else:
+                    self._show_command_message(text, command.message)
             self._refresh()
             if command.exit_requested:
                 self.exit()
@@ -2133,6 +2136,10 @@ class TauTuiApp(App[None]):
         if item is None:
             return None
         return item.apply(value)
+
+    def _append_command_message(self, command_text: str, message: str) -> None:
+        """Append non-persistent command output to the visible transcript."""
+        self.state.add_item("status", f"{_command_output_title(command_text)}\n{message}")
 
     def _show_command_message(self, command_text: str, message: str) -> None:
         self.push_screen(
@@ -2718,6 +2725,12 @@ def _filter_model_choices(choices: Sequence[ModelChoice], query: str) -> tuple[M
         for choice in choices
         if normalized in choice.provider_name.lower() or normalized in choice.model.lower()
     )
+
+
+def _command_message_uses_transcript(command_text: str) -> bool:
+    """Return whether slash-command output should appear inline in the transcript."""
+    command_name = command_text.split(maxsplit=1)[0].casefold()
+    return command_name == "/reload"
 
 
 def _command_output_title(command_text: str) -> str:

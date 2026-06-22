@@ -118,6 +118,12 @@ class FakeSession:
                 handled=True,
                 message="Session info",
             )
+        if text == "/reload":
+            self.reload_count += 1
+            return CommandResult(
+                handled=True,
+                message="Reloaded local coding resources and project context.",
+            )
         if text == "/new":
             return CommandResult(handled=True, new_session_requested=True)
         if text.startswith("/compact "):
@@ -1710,6 +1716,27 @@ async def test_tui_app_help_uses_modal_instead_of_transcript() -> None:
         scroll = app.screen.query_one("#command-output-scroll", VerticalScroll)
         assert scroll is not None
         assert app.screen.focused is scroll
+
+
+@pytest.mark.anyio
+async def test_tui_app_reload_appends_command_output_to_transcript() -> None:
+    session = FakeSession()
+    app = TauTuiApp(session)
+
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt")
+        prompt.value = "/reload"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, CommandOutputScreen)
+        assert session.reload_count == 1
+        assert app.state.items == [
+            ChatItem(
+                role="status",
+                text="/reload\nReloaded local coding resources and project context.",
+            )
+        ]
 
 
 @pytest.mark.anyio
