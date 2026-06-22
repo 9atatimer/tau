@@ -80,12 +80,19 @@ Provider settings may declare thinking support with:
 ```
 
 `thinking_models` is optional. If it is omitted, the declared levels apply to
-all models for that provider. Tau's built-in direct OpenAI provider declares
-known GPT-5 reasoning models and sends `reasoning_effort` through the
-OpenAI-compatible chat-completions adapter. OpenRouter and Hugging Face remain
-disabled unless an OpenAI-compatible provider config explicitly opts in.
-Anthropic and Codex-subscription thinking controls are rejected until their
-adapters implement a provider-specific mapping.
+all models for that provider. Tau's built-in providers declare thinking support
+only for models whose reasoning controls were checked when the model was added.
+When adding new catalog models, validate the provider docs/API first and update
+`thinking_models` only for models that actually support Tau's configured
+thinking parameter.
+
+The supported parameter mappings are:
+
+- `reasoning_effort`: top-level OpenAI-compatible chat-completions field.
+- `reasoning.effort`: nested Responses API shape, sent as
+  `{ "reasoning": { "effort": "..." } }`.
+- `anthropic.thinking`: Anthropic extended thinking, sent as
+  `{ "thinking": { "type": "enabled", "budget_tokens": ... } }`.
 
 Tau records an explicit reason when controls are unavailable:
 
@@ -93,11 +100,8 @@ Tau records an explicit reason when controls are unavailable:
   thinking capability metadata.
 - Providers with `thinking_models` report that the active model is not listed
   when the model is outside that capability set.
-- OpenAI Codex subscription models report that the adapter can stream reasoning
-  output, but Tau does not yet have a supported Codex transport mapping for
-  changing reasoning effort.
-- Anthropic models report that Anthropic's thinking controls are
-  model-specific, and Tau has not mapped them yet.
+- Provider-specific configs use the mapped runtime parameter above when the
+  active model is declared as capable.
 
 This keeps the durable provider metadata in `tau_coding`, the provider-specific
 runtime knob in `tau_ai`, and the display choice in CLI/TUI code.
@@ -111,17 +115,17 @@ and `xhigh`, with defaults and support varying by model. Tau's direct OpenAI
 entry maps Tau's normalized levels to `reasoning_effort` only for configured
 reasoning-capable models.
 
-Codex clients expose `model_reasoning_effort` for supported models, but the
-documented configuration is Responses-API-specific and model-dependent. Tau's
-subscription adapter talks to the ChatGPT Codex subscription transport and
-currently only includes streamed reasoning content; it does not send a
-reasoning-effort request parameter. That is why `openai-codex:gpt-5.5` shows
-thinking controls as unavailable today.
+Codex clients expose `model_reasoning_effort` for supported models. Tau maps
+Codex subscription thinking levels to the Responses API `reasoning.effort`
+payload shape for the built-in Codex models that declare support. Codex does not
+currently expose Tau's `off` mode because the Responses effort values begin at
+`minimal` for this transport.
 
 Anthropic has used both explicit extended-thinking token budgets and newer
-adaptive/effort controls, with support changing by model family. Tau can stream
-Anthropic thinking deltas, but it does not yet expose a normalized control
-because a single fixed level list would hide important model-specific behavior.
+adaptive/effort controls, with support changing by model family. Tau maps its
+normalized thinking levels to explicit Anthropic `budget_tokens` for the
+built-in Claude models that declare extended-thinking support. `off` omits the
+`thinking` payload.
 
 Models or providers without declared capability metadata are treated as having
 no configurable thinking mode. Their existing session thinking setting is kept
