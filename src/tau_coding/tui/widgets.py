@@ -164,7 +164,12 @@ def _selectable_markdown_block_class(block_class: type[Any]) -> type[Any]:
             text = str(visual) if isinstance(visual, Text | Content) else self.source
             if text is None:
                 return None
-            selected_text = _extract_text_selection(text, selection)
+            selected_text = _extract_visual_line_selection(
+                [self.render_line(y).text for y in range(self.size.height)],
+                selection,
+            )
+            if selected_text is None:
+                selected_text = _extract_text_selection(text, selection)
             if not selected_text:
                 return None
             return selected_text, "\n"
@@ -586,6 +591,22 @@ def _extract_rendered_selection(
         text_start = max(start - line.rendered_prefix_width, 0)
         text_end = len(line.text) if end == -1 else max(end - line.rendered_prefix_width, 0)
         selected_lines.append(line.text[text_start:text_end])
+    return "\n".join(selected_lines)
+
+
+def _extract_visual_line_selection(lines: list[str], selection: Selection) -> str | None:
+    if not lines:
+        return None
+    selected_lines: list[str] = []
+    for line_y, line in enumerate(lines):
+        span = selection.get_span(line_y)
+        if span is None:
+            continue
+        start, end = span
+        line_end = len(line) if end == -1 else max(end, 0)
+        selected_lines.append(line[max(start, 0) : line_end].rstrip())
+    if not selected_lines:
+        return None
     return "\n".join(selected_lines)
 
 

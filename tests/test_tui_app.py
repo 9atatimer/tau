@@ -899,6 +899,32 @@ async def test_transcript_message_widget_extracts_partial_rendered_selection() -
 
 
 @pytest.mark.anyio
+async def test_streaming_markdown_selection_uses_wrapped_visual_line() -> None:
+    app = TauTuiApp(FakeSession(messages=[]))
+
+    async with app.run_test(size=(40, 20)) as pilot:
+        await pilot.pause()
+        transcript = app.query_one("#transcript", TranscriptView)
+        widget = await transcript.start_assistant_message()
+        await widget.replace_text("alpha beta gamma delta epsilon zeta eta theta")
+        await pilot.pause()
+        block = next(
+            child
+            for child in widget.query("*")
+            if child.__class__.__name__.startswith("SelectableMarkdown")
+        )
+
+        assert block.get_selection(Selection(Offset(0, 1), Offset(4, 1))) == (
+            "zeta",
+            "\n",
+        )
+        assert block.get_selection(Selection(Offset(0, 0), Offset(5, 0))) == (
+            "alpha",
+            "\n",
+        )
+
+
+@pytest.mark.anyio
 async def test_tui_transcript_selects_only_one_message() -> None:
     app = TauTuiApp(
         FakeSession(
