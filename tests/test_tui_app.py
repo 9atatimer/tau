@@ -536,8 +536,8 @@ def test_assistant_chat_items_apply_syntax_highlighting_to_code_fences() -> None
 
     assert "def" in output
     assert "return" in output
-    assert "\x1b[94;48;2;0;0;0mdef" in output
-    assert "\x1b[94;48;2;0;0;0mreturn" in output
+    assert "\x1b[94;48;2;11;15;20mdef" in output
+    assert "\x1b[94;48;2;11;15;20mreturn" in output
 
 
 def test_chat_items_fallback_unknown_fenced_language_to_plain_code() -> None:
@@ -847,8 +847,8 @@ def test_dark_theme_markdown_code_uses_aqua_highlight() -> None:
 
     output = console.export_text(styles=True)
 
-    assert "38;2;103;232;249" in output
-    assert "38;2;244;162;97" not in output
+    assert "38;2;117;158;149" in output
+    assert "38;2;219;148;90" not in output
 
 
 def test_assistant_markdown_titles_use_highlight_color_and_left_alignment() -> None:
@@ -890,7 +890,7 @@ def test_markdown_tables_use_highlight_color_for_headers() -> None:
 
     output = console.export_text(styles=True)
 
-    assert "38;2;244;162;97" in output
+    assert "38;2;219;148;90" in output
     assert "\x1b[36" not in output
 
 
@@ -913,7 +913,12 @@ def test_textual_markdown_uses_theme_highlight_and_aqua_inline_code() -> None:
 
     assert variables["tau-markdown-highlight"] == TAU_LIGHT_THEME.markdown_heading
     assert variables["tau-markdown-table-header"] == TAU_LIGHT_THEME.markdown_table_header
+    assert variables["tau-markdown-table-border"] == TAU_LIGHT_THEME.markdown_table_border
     assert variables["tau-markdown-inline-code"] == TAU_LIGHT_THEME.markdown_inline_code
+    assert (
+        variables["tau-markdown-code-block-background"]
+        == TAU_LIGHT_THEME.markdown_code_block_background
+    )
     assert variables["tau-markdown-link"] == TAU_LIGHT_THEME.markdown_link
     assert variables["tau-markdown-bullet"] == TAU_LIGHT_THEME.markdown_bullet
 

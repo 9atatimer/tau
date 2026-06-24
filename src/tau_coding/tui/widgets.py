@@ -10,7 +10,7 @@ from pygments.lexers import get_lexer_by_name  # type: ignore[import-untyped]
 from pygments.util import ClassNotFound  # type: ignore[import-untyped]
 from rich.align import Align
 from rich.console import Console, Group, RenderableType
-from rich.markdown import Heading, Markdown
+from rich.markdown import CodeBlock, Heading, Markdown
 from rich.padding import Padding
 from rich.rule import Rule
 from rich.style import Style
@@ -156,6 +156,14 @@ class ThemedMarkdownWidget(TextualMarkdown):
 
     ThemedMarkdownWidget MarkdownBullet {
         color: $tau-markdown-bullet;
+    }
+
+    ThemedMarkdownWidget MarkdownFence {
+        background: $tau-markdown-code-block-background;
+    }
+
+    ThemedMarkdownWidget MarkdownTableContent {
+        keyline: thin $tau-markdown-table-border;
     }
 
     ThemedMarkdownWidget MarkdownTableContent > .header {
@@ -609,6 +617,7 @@ def _transcript_plain_body_text(
         result_text,
         body_style=body_style,
         syntax_theme=theme.syntax_theme,
+        code_block_background=theme.markdown_code_block_background,
     )
     if patch_body is not None:
         return Group(invocation_text, Text(""), patch_body)
@@ -922,6 +931,7 @@ def _render_chat_body(
         text,
         body_style=body_style,
         syntax_theme=syntax_theme,
+        code_block_background=theme.markdown_code_block_background,
     )
     if patch_body is not None:
         return patch_body
@@ -937,11 +947,14 @@ def _render_chat_body(
             inline_code_style=_markdown_inline_code_style(theme),
             link_style=theme.markdown_link,
             bullet_style=theme.markdown_bullet,
+            table_border_style=theme.markdown_table_border,
+            code_block_background=theme.markdown_code_block_background,
         )
     fenced_body = _render_fenced_body(
         text,
         body_style=body_style,
         syntax_theme=syntax_theme,
+        code_block_background=theme.markdown_code_block_background,
     )
     if fenced_body is not None:
         return fenced_body
@@ -955,6 +968,7 @@ def _render_patch_body(
     *,
     body_style: str,
     syntax_theme: str,
+    code_block_background: str,
 ) -> RenderableType | None:
     marker = "\nPatch:\n"
     if marker not in text:
@@ -969,9 +983,35 @@ def _render_patch_body(
             "diff",
             theme=syntax_theme,
             word_wrap=True,
-            background_color="default",
+            background_color=code_block_background,
         ),
     )
+
+
+class ThemedCodeBlock(CodeBlock):
+    """Rich Markdown code block with Tau's themed background color."""
+
+    @classmethod
+    def create(cls, markdown: Markdown, token: Any) -> "ThemedCodeBlock":
+        node_info = token.info or ""
+        lexer_name = node_info.partition(" ")[0]
+        code_block_background = getattr(markdown, "code_block_background", "default")
+        return cls(lexer_name or "text", markdown.code_theme, code_block_background)
+
+    def __init__(self, lexer_name: str, theme: str, code_block_background: str) -> None:
+        super().__init__(lexer_name, theme)
+        self.code_block_background = code_block_background
+
+    def __rich_console__(self, console: Console, options: Any) -> Any:
+        code = str(self.text).rstrip()
+        yield Syntax(
+            code,
+            self.lexer_name,
+            theme=self.theme,
+            word_wrap=True,
+            padding=1,
+            background_color=self.code_block_background,
+        )
 
 
 class LeftAlignedMarkdownHeading(Heading):
@@ -990,7 +1030,12 @@ class LeftAlignedMarkdownHeading(Heading):
 class ThemedMarkdown(Markdown):
     """Markdown renderer with Tau's softer heading/accent colors."""
 
-    elements = {**Markdown.elements, "heading_open": LeftAlignedMarkdownHeading}
+    elements = {
+        **Markdown.elements,
+        "heading_open": LeftAlignedMarkdownHeading,
+        "fence": ThemedCodeBlock,
+        "code_block": ThemedCodeBlock,
+    }
 
     def __init__(
         self,
@@ -1000,6 +1045,8 @@ class ThemedMarkdown(Markdown):
         inline_code_style: str,
         link_style: str,
         bullet_style: str,
+        table_border_style: str,
+        code_block_background: str,
         code_theme: str,
         inline_code_theme: str,
         style: str = "none",
@@ -1014,6 +1061,8 @@ class ThemedMarkdown(Markdown):
         self.inline_code_style = inline_code_style
         self.link_style = link_style
         self.bullet_style = bullet_style
+        self.table_border_style = table_border_style
+        self.code_block_background = code_block_background
 
     def __rich_console__(self, console: Console, options: Any) -> Any:
         with console.use_theme(
@@ -1022,6 +1071,8 @@ class ThemedMarkdown(Markdown):
                 self.inline_code_style,
                 self.link_style,
                 self.bullet_style,
+                self.table_border_style,
+                self.code_block_background,
             )
         ):
             yield from super().__rich_console__(console, options)
@@ -1040,11 +1091,15 @@ def _markdown_theme(
     inline_code_style: str,
     link_style: str,
     bullet_style: str,
+    table_border_style: str,
+    code_block_background: str,
 ) -> Theme:
     highlight = Style.parse(heading_style)
     inline_code = Style.parse(inline_code_style)
     link = Style.parse(link_style)
     bullet = Style.parse(bullet_style)
+    table_border = Style.parse(table_border_style)
+    code_block = Style(bgcolor=code_block_background)
     return Theme(
         {
             "markdown.h1": highlight + Style(bold=True),
@@ -1059,8 +1114,9 @@ def _markdown_theme(
             "markdown.link": link,
             "markdown.link_url": link,
             "markdown.table.header": highlight + Style(bold=True),
-            "markdown.table.border": highlight,
+            "markdown.table.border": table_border,
             "markdown.code": inline_code,
+            "markdown.code_block": code_block,
         }
     )
 
@@ -1070,6 +1126,7 @@ def _render_fenced_body(
     *,
     body_style: str,
     syntax_theme: str,
+    code_block_background: str,
 ) -> RenderableType | None:
     if "```" not in text:
         return None
@@ -1102,7 +1159,7 @@ def _render_fenced_body(
                 language,
                 theme=syntax_theme,
                 word_wrap=True,
-                background_color="default",
+                background_color=code_block_background,
             )
         )
         closing_line_end = text.find("\n", closing_start + 1)
