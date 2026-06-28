@@ -437,7 +437,7 @@ wheels = [
 ]
 
 [[package]]
-name = "tau"
+name = "tau-ai"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

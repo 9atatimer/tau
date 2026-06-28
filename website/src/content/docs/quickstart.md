@@ -12,7 +12,7 @@ Tau is a Python tool. The easiest way to install it is with
 [`uv`](https://docs.astral.sh/uv/):
 
 ```bash
-uv tool install git+https://github.com/alejandro-ao/tau.git
+uv tool install tau-ai
 ```
 
 Check it worked:
