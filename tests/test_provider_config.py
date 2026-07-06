@@ -114,6 +114,58 @@ def test_builtin_openai_declares_model_scoped_thinking_capabilities() -> None:
     assert provider_thinking_levels(anthropic, model="claude-haiku-4-5") == ()
 
 
+def test_load_provider_settings_accepts_provider_preferences_with_user_catalog(
+    tmp_path: Path,
+) -> None:
+    tau_home = tmp_path / ".tau"
+    tau_home.mkdir()
+    (tau_home / "catalog.toml").write_text(
+        """
+schema_version = 1
+
+[[providers]]
+name = "local"
+display_name = "local"
+kind = "openai-compatible"
+base_url = "http://localhost:11434/v1"
+api_key_env = "LOCAL_API_KEY"
+models = ["qwen", "llama"]
+default_model = "qwen"
+docs_url = "http://localhost:11434/v1"
+""".strip(),
+        encoding="utf-8",
+    )
+    (tau_home / "providers.json").write_text(
+        json.dumps(
+            {
+                "default_provider": "local",
+                "provider_preferences": {
+                    "local": {
+                        "default_model": "qwen",
+                        "headers": {"X-Test": "yes"},
+                        "timeout_seconds": 12.0,
+                        "max_retries": 1,
+                        "max_retry_delay_seconds": 0.5,
+                        "thinking_defaults": {},
+                    }
+                },
+                "scoped_models": [{"provider": "local", "model": "qwen"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_provider_settings(TauPaths(home=tau_home))
+
+    provider = settings.get_provider("local")
+    assert settings.default_provider == "local"
+    assert provider.base_url == "http://localhost:11434/v1"
+    assert provider.default_model == "qwen"
+    assert provider.headers == {"X-Test": "yes"}
+    assert provider.timeout_seconds == 12.0
+    assert settings.scoped_models == (ScopedModelConfig(provider="local", model="qwen"),)
+
+
 def test_save_provider_settings_writes_backup_when_replacing(tmp_path: Path) -> None:
     paths = TauPaths(home=tmp_path / ".tau")
     initial = ProviderSettings(

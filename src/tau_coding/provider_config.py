@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from json import dumps, loads
@@ -23,7 +24,11 @@ from tau_ai import (
 from tau_ai.env import DEFAULT_OPENAI_COMPATIBLE_BASE_URL
 from tau_coding.credentials import FileCredentialStore, credentials_path
 from tau_coding.paths import TauPaths
-from tau_coding.provider_catalog import BUILTIN_PROVIDER_CATALOG, ProviderKind
+from tau_coding.provider_catalog import (
+    BUILTIN_PROVIDER_CATALOG,
+    ProviderCatalogEntry,
+    ProviderKind,
+)
 from tau_coding.thinking import (
     DEFAULT_THINKING_LEVEL,
     ThinkingLevel,
@@ -291,38 +296,16 @@ def builtin_provider_configs() -> tuple[ProviderConfig, ...]:
 def provider_config_from_catalog_entry(name: str) -> ProviderConfig:
     """Create a durable provider config from a built-in catalog entry."""
     for entry in BUILTIN_PROVIDER_CATALOG:
-        if entry.name != name:
-            continue
-        context_windows = dict(entry.context_windows or {})
-        if entry.kind == "anthropic":
-            return AnthropicProviderConfig(
-                name=entry.name,
-                base_url=entry.base_url,
-                api_key_env=entry.api_key_env,
-                credential_name=entry.credential_name,
-                models=entry.models,
-                default_model=entry.default_model,
-                context_windows=context_windows,
-                thinking_levels=entry.thinking_levels,
-                thinking_models=entry.thinking_models,
-                thinking_default=entry.thinking_default,
-                thinking_parameter=entry.thinking_parameter,
-            )
-        if entry.kind == "openai-codex":
-            return OpenAICodexProviderConfig(
-                name=entry.name,
-                base_url=entry.base_url,
-                api_key_env=entry.api_key_env,
-                credential_name=entry.credential_name,
-                models=entry.models,
-                default_model=entry.default_model,
-                context_windows=context_windows,
-                thinking_levels=entry.thinking_levels,
-                thinking_models=entry.thinking_models,
-                thinking_default=entry.thinking_default,
-                thinking_parameter=entry.thinking_parameter,
-            )
-        return OpenAICompatibleProviderConfig(
+        if entry.name == name:
+            return provider_config_from_entry(entry)
+    raise ProviderConfigError(f"Unknown built-in provider: {name}")
+
+
+def provider_config_from_entry(entry: ProviderCatalogEntry) -> ProviderConfig:
+    """Create a durable provider config from a catalog entry."""
+    context_windows = dict(entry.context_windows or {})
+    if entry.kind == "anthropic":
+        return AnthropicProviderConfig(
             name=entry.name,
             base_url=entry.base_url,
             api_key_env=entry.api_key_env,
@@ -335,7 +318,33 @@ def provider_config_from_catalog_entry(name: str) -> ProviderConfig:
             thinking_default=entry.thinking_default,
             thinking_parameter=entry.thinking_parameter,
         )
-    raise ProviderConfigError(f"Unknown built-in provider: {name}")
+    if entry.kind == "openai-codex":
+        return OpenAICodexProviderConfig(
+            name=entry.name,
+            base_url=entry.base_url,
+            api_key_env=entry.api_key_env,
+            credential_name=entry.credential_name,
+            models=entry.models,
+            default_model=entry.default_model,
+            context_windows=context_windows,
+            thinking_levels=entry.thinking_levels,
+            thinking_models=entry.thinking_models,
+            thinking_default=entry.thinking_default,
+            thinking_parameter=entry.thinking_parameter,
+        )
+    return OpenAICompatibleProviderConfig(
+        name=entry.name,
+        base_url=entry.base_url,
+        api_key_env=entry.api_key_env,
+        credential_name=entry.credential_name,
+        models=entry.models,
+        default_model=entry.default_model,
+        context_windows=context_windows,
+        thinking_levels=entry.thinking_levels,
+        thinking_models=entry.thinking_models,
+        thinking_default=entry.thinking_default,
+        thinking_parameter=entry.thinking_parameter,
+    )
 
 
 def default_openai_provider_config() -> OpenAICompatibleProviderConfig:
@@ -359,7 +368,7 @@ def load_provider_settings(paths: TauPaths | None = None) -> ProviderSettings:
     raw = loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ProviderConfigError("Provider settings must be a JSON object")
-    return _with_builtin_catalog_models(provider_settings_from_json(raw), paths=paths)
+    return _with_builtin_catalog_models(provider_settings_from_json(raw, paths=paths), paths=paths)
 
 
 def save_provider_settings(settings: ProviderSettings, paths: TauPaths | None = None) -> Path:
@@ -614,9 +623,27 @@ def _atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
-def provider_settings_from_json(data: dict[str, Any]) -> ProviderSettings:
-    """Parse provider settings from JSON-compatible data."""
+def provider_settings_from_json(
+    data: dict[str, Any],
+    *,
+    paths: TauPaths | None = None,
+) -> ProviderSettings:
+    """Parse provider settings from JSON-compatible data.
+
+    Tau briefly wrote a compact ``provider_preferences`` shape that referenced
+    provider definitions from the built-in/user catalog. Accept it here so those
+    installs continue to start, then future saves will rewrite full
+    ``providers`` entries.
+    """
     default_provider = _string(data.get("default_provider"), "default_provider")
+    scoped_models = _scoped_models_from_json(data.get("scoped_models"))
+    if "provider_preferences" in data:
+        return ProviderSettings(
+            default_provider=default_provider,
+            providers=_providers_with_preferences(data.get("provider_preferences"), paths=paths),
+            scoped_models=scoped_models,
+        )
+
     providers_data = data.get("providers")
     if not isinstance(providers_data, list) or not providers_data:
         raise ProviderConfigError("Provider settings must include at least one provider")
@@ -624,11 +651,190 @@ def provider_settings_from_json(data: dict[str, Any]) -> ProviderSettings:
     names = [provider.name for provider in providers]
     if len(set(names)) != len(names):
         raise ProviderConfigError("Provider names must be unique")
-    scoped_models = _scoped_models_from_json(data.get("scoped_models"))
     return ProviderSettings(
         default_provider=default_provider,
         providers=providers,
         scoped_models=scoped_models,
+    )
+
+
+def _providers_with_preferences(
+    value: object,
+    *,
+    paths: TauPaths | None,
+) -> tuple[ProviderConfig, ...]:
+    """Build provider configs from the legacy provider_preferences map."""
+    if not isinstance(value, dict):
+        raise ProviderConfigError("Provider settings field must be an object: provider_preferences")
+    catalog_configs = {provider.name: provider for provider in _effective_provider_configs(paths)}
+    providers: list[ProviderConfig] = []
+    seen: set[str] = set()
+    for name, preference_data in value.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ProviderConfigError("Provider preference names must be non-empty strings")
+        provider_name = name.strip()
+        if provider_name in seen:
+            raise ProviderConfigError("Provider preference names must be unique")
+        provider = catalog_configs.get(provider_name)
+        if provider is None:
+            raise ProviderConfigError(f"Unknown provider preference: {provider_name}")
+        providers.append(_apply_provider_preference(provider, preference_data))
+        seen.add(provider_name)
+    return tuple(providers)
+
+
+def _apply_provider_preference(provider: ProviderConfig, value: object) -> ProviderConfig:
+    """Apply saved runtime preferences to a catalog provider definition."""
+    if not isinstance(value, dict):
+        raise ProviderConfigError("Provider preference entries must be objects")
+    allowed = {
+        "default_model",
+        "headers",
+        "timeout_seconds",
+        "max_retries",
+        "max_retry_delay_seconds",
+        "thinking_defaults",
+    }
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        raise ProviderConfigError(
+            f"Unknown provider preference fields for {provider.name}: {', '.join(unknown)}"
+        )
+    default_model = (
+        _string(value.get("default_model"), f"provider_preferences.{provider.name}.default_model")
+        if "default_model" in value
+        else provider.default_model
+    )
+    models = (
+        provider.models if default_model in provider.models else (*provider.models, default_model)
+    )
+    headers = (
+        _string_dict(value.get("headers"), f"provider_preferences.{provider.name}.headers")
+        if "headers" in value
+        else provider.headers
+    )
+    timeout_seconds = (
+        _positive_float(
+            value.get("timeout_seconds"),
+            f"provider_preferences.{provider.name}.timeout_seconds",
+        )
+        if "timeout_seconds" in value
+        else provider.timeout_seconds
+    )
+    max_retries = (
+        _non_negative_int(
+            value.get("max_retries"), f"provider_preferences.{provider.name}.max_retries"
+        )
+        if "max_retries" in value
+        else provider.max_retries
+    )
+    max_retry_delay_seconds = (
+        _non_negative_float(
+            value.get("max_retry_delay_seconds"),
+            f"provider_preferences.{provider.name}.max_retry_delay_seconds",
+        )
+        if "max_retry_delay_seconds" in value
+        else provider.max_retry_delay_seconds
+    )
+    thinking_default = provider.thinking_default
+    if "thinking_defaults" in value:
+        thinking_default = _thinking_default_preference(
+            value.get("thinking_defaults"),
+            provider=provider,
+            default_model=default_model,
+        )
+    return replace(
+        provider,
+        models=models,
+        default_model=default_model,
+        headers=headers,
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+        max_retry_delay_seconds=max_retry_delay_seconds,
+        thinking_default=thinking_default,
+    )
+
+
+def _thinking_default_preference(
+    value: object,
+    *,
+    provider: ProviderConfig,
+    default_model: str,
+) -> ThinkingLevel | None:
+    """Return the saved thinking default for the provider default model, if any."""
+    if not isinstance(value, dict):
+        raise ProviderConfigError("Provider preference thinking_defaults must be an object")
+    if default_model not in value:
+        return provider.thinking_default
+    return normalize_thinking_level(
+        _string(
+            value.get(default_model),
+            f"provider_preferences.{provider.name}.thinking_defaults.{default_model}",
+        )
+    )
+
+
+def _effective_provider_configs(paths: TauPaths | None = None) -> tuple[ProviderConfig, ...]:
+    """Return built-in provider configs plus user catalog.toml definitions, if present."""
+    providers = list(builtin_provider_configs())
+    provider_names = {provider.name for provider in providers}
+    catalog_path = (paths or TauPaths()).home / "catalog.toml"
+    if not catalog_path.exists():
+        return tuple(providers)
+    raw = tomllib.loads(catalog_path.read_text(encoding="utf-8"))
+    entries = raw.get("providers", [])
+    if not isinstance(entries, list):
+        raise ProviderConfigError("Provider catalog field must be a list: providers")
+    for item in entries:
+        if not isinstance(item, dict):
+            raise ProviderConfigError("Provider catalog entries must be objects")
+        entry = _catalog_entry_from_json(item)
+        provider = provider_config_from_entry(entry)
+        if provider.name not in provider_names:
+            providers.append(provider)
+            provider_names.add(provider.name)
+    return tuple(providers)
+
+
+def _catalog_entry_from_json(data: dict[str, Any]) -> ProviderCatalogEntry:
+    name = _string(data.get("name"), "catalog.providers.name")
+    kind = data.get("kind")
+    if kind not in {"openai-compatible", "anthropic", "openai-codex"}:
+        raise ProviderConfigError(f"Provider catalog entry has unknown kind: {kind!r}")
+    models = _string_tuple(data.get("models"), f"catalog.providers[{name}].models")
+    default_model = _string(data.get("default_model"), f"catalog.providers[{name}].default_model")
+    credential_name = data.get("credential_name")
+    if credential_name is not None:
+        credential_name = _string(credential_name, f"catalog.providers[{name}].credential_name")
+    return ProviderCatalogEntry(
+        name=name,
+        display_name=_string(
+            data.get("display_name", name), f"catalog.providers[{name}].display_name"
+        ),
+        kind=kind,
+        base_url=_string(data.get("base_url"), f"catalog.providers[{name}].base_url"),
+        api_key_env=_string(data.get("api_key_env"), f"catalog.providers[{name}].api_key_env"),
+        credential_name=credential_name,
+        models=models,
+        default_model=default_model,
+        docs_url=_string(
+            data.get("docs_url", data.get("base_url")), f"catalog.providers[{name}].docs_url"
+        ),
+        context_windows=_context_window_dict(
+            data.get("context_windows", {}), f"catalog.providers[{name}].context_windows"
+        ),
+        thinking_levels=_optional_thinking_levels(
+            data.get("thinking_levels"), f"catalog.providers[{name}].thinking_levels"
+        ),
+        thinking_models=_optional_string_tuple(
+            data.get("thinking_models"), f"catalog.providers[{name}].thinking_models"
+        ),
+        thinking_default=_optional_thinking_level(
+            data.get("thinking_default"), f"catalog.providers[{name}].thinking_default"
+        ),
+        thinking_parameter=_optional_thinking_parameter(
+            data.get("thinking_parameter"), f"catalog.providers[{name}].thinking_parameter"
+        ),
     )
 
 
